@@ -33,10 +33,12 @@ Thumbs.db
 apps/api/prisma/*.db
 apps/api/prisma/*.db-journal
 
-# Uploads / temp
+# Local uploaded files / temp dirs (NOT Nest source: apps/api/src/uploads/)
 tmp/
 temp/
-uploads/
+/uploads/
+apps/api/uploads/
+apps/web/uploads/
 
 # OpenAPI local export
 apps/api/openapi.json
