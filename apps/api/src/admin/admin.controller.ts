@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { Roles } from '../common/decorators';
@@ -8,6 +8,12 @@ import {
   UpdateBrandDto,
   BrandSuggestionDto,
 } from '../brands/brands.dto';
+import {
+  AdminReviewQueueQueryDto,
+  ModerateReviewDto,
+  ResolveSuggestionDto,
+  SuspendUserDto,
+} from './admin.dto';
 import { CurrentUser } from '../common/current-user.decorator';
 import { SWAGGER_BEARER_AUTH } from '../common/swagger';
 
@@ -31,6 +37,7 @@ export class AdminController {
   }
 
   @ApiOperation({ summary: 'POST /admin/brands — Create brand' })
+  @ApiBody({ type: CreateBrandDto })
   @Post('admin/brands')
   createBrand(@Body() dto: CreateBrandDto) {
     return this.admin.createBrand(dto);
@@ -41,6 +48,7 @@ export class AdminController {
     description:
       'Set claimed:true ONLY after verifying the business. Public users cannot claim.',
   })
+  @ApiBody({ type: UpdateBrandDto })
   @Patch('admin/brands/:id')
   updateBrand(@Param('id') id: string, @Body() dto: UpdateBrandDto) {
     return this.admin.updateBrand(id, dto);
@@ -57,20 +65,17 @@ export class AdminController {
     description: 'Query queue=flagged|reported|pending_receipt|suspended',
   })
   @Get('admin/reviews/queue')
-  reviewQueue(@Query('queue') queue: string) {
-    return this.admin.reviewQueue(queue ?? 'flagged');
+  reviewQueue(@Query() query: AdminReviewQueueQueryDto) {
+    return this.admin.reviewQueue(query.queue ?? 'flagged');
   }
 
   @ApiOperation({
     summary: 'PATCH /admin/reviews/{id} — Moderate review',
-    description: 'Body: { action: approve|suspend|remove|dismiss_report|verify_receipt, note?, approved? }',
   })
+  @ApiBody({ type: ModerateReviewDto })
   @Patch('admin/reviews/:id')
-  moderateReview(
-    @Param('id') id: string,
-    @Body() body: { action: string; note?: string; approved?: boolean },
-  ) {
-    return this.admin.moderateReview(id, body.action, body.note, body.approved);
+  moderateReview(@Param('id') id: string, @Body() dto: ModerateReviewDto) {
+    return this.admin.moderateReview(id, dto.action, dto.note, dto.approved);
   }
 
   @ApiOperation({ summary: 'GET /admin/suggestions — Pending brand suggestions' })
@@ -81,26 +86,23 @@ export class AdminController {
 
   @ApiOperation({
     summary: 'PATCH /admin/suggestions/{id} — Approve or reject',
-    description: 'Body: { status: approved|rejected, adminNote? }',
   })
+  @ApiBody({ type: ResolveSuggestionDto })
   @Patch('admin/suggestions/:id')
   resolveSuggestion(
     @Param('id') id: string,
-    @Body() body: { status: 'approved' | 'rejected'; adminNote?: string },
+    @Body() dto: ResolveSuggestionDto,
   ) {
-    return this.admin.resolveSuggestion(id, body.status, body.adminNote);
+    return this.admin.resolveSuggestion(id, dto.status, dto.adminNote);
   }
 
   @ApiOperation({
     summary: 'PATCH /admin/users/{id}/suspend — Suspend user',
-    description: 'Body: { suspended: true|false, reason: string }',
   })
+  @ApiBody({ type: SuspendUserDto })
   @Patch('admin/users/:id/suspend')
-  suspendUser(
-    @Param('id') id: string,
-    @Body() body: { suspended: boolean; reason: string },
-  ) {
-    return this.admin.suspendUser(id, body.suspended, body.reason);
+  suspendUser(@Param('id') id: string, @Body() dto: SuspendUserDto) {
+    return this.admin.suspendUser(id, dto.suspended, dto.reason);
   }
 }
 
@@ -111,6 +113,7 @@ export class BrandSuggestionsController {
   constructor(private admin: AdminService) {}
 
   @ApiOperation({ summary: 'POST /brand-suggestions — Suggest a missing brand (JWT)' })
+  @ApiBody({ type: BrandSuggestionDto })
   @Post()
   suggest(@CurrentUser() user: { id: string }, @Body() dto: BrandSuggestionDto) {
     return this.admin.suggestBrand(user.id, dto);

@@ -9,7 +9,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReviewsService } from './reviews.service';
 import {
   AddMediaDto,
@@ -54,6 +54,7 @@ export class ReviewsController {
     description:
       'Phone/email OTP verification is not required in v1. Admin routes still require ADMIN role.',
   })
+  @ApiBody({ type: CreateReviewDto })
   @Post('reviews')
   create(
     @CurrentUser() user: { id: string },
@@ -66,6 +67,7 @@ export class ReviewsController {
 
   @ApiBearerAuth(SWAGGER_BEARER_AUTH)
   @ApiOperation({ summary: 'Update own review (JWT)' })
+  @ApiBody({ type: UpdateReviewDto })
   @Patch('reviews/:id')
   update(
     @CurrentUser() user: { id: string },
@@ -83,7 +85,10 @@ export class ReviewsController {
   }
 
   @ApiBearerAuth(SWAGGER_BEARER_AUTH)
-  @ApiOperation({ summary: 'Attach photo/receipt URL after Cloudinary upload (JWT)' })
+  @ApiOperation({
+    summary: 'Attach photo/receipt URL after Cloudinary upload (JWT)',
+  })
+  @ApiBody({ type: AddMediaDto })
   @Post('reviews/:id/media')
   addMedia(
     @CurrentUser() user: { id: string },
@@ -95,6 +100,7 @@ export class ReviewsController {
 
   @ApiBearerAuth(SWAGGER_BEARER_AUTH)
   @ApiOperation({ summary: 'Report a review (JWT)' })
+  @ApiBody({ type: ReportReviewDto })
   @Post('reviews/:id/report')
   report(
     @CurrentUser() user: { id: string },

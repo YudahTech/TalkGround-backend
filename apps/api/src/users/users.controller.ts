@@ -1,6 +1,7 @@
 import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
 import {
   ApiBearerAuth,
+  ApiBody,
   ApiOperation,
   ApiParam,
   ApiTags,
@@ -40,6 +41,7 @@ export class UsersController {
     summary: 'PATCH /users/me — Update my profile',
     description: 'Requires JWT. Partial update: displayName, bio, avatarUrl, city, interests.',
   })
+  @ApiBody({ type: UpdateProfileDto })
   @Patch('me')
   updateMe(@CurrentUser() user: { id: string }, @Body() dto: UpdateProfileDto) {
     return this.users.updateMe(user.id, dto);

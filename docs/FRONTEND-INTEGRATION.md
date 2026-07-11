@@ -23,6 +23,21 @@
 NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
 ```
 
+### Swagger request schemas (DTO examples)
+
+Every write endpoint documents its body in Swagger (Schemas + Try it out):
+
+| Tag | Example DTO |
+|-----|-------------|
+| Auth | `RegisterDto`, `LoginDto`, `ConfirmOtpDto` |
+| Reviews | `CreateReviewDto`, `UpdateReviewDto`, `AddMediaDto`, `ReportReviewDto` |
+| Users | `UpdateProfileDto` |
+| Uploads | `UploadSignatureDto` |
+| Admin | `CreateBrandDto`, `UpdateBrandDto` (`claimed`), `ModerateReviewDto` |
+| Growth | `WaitlistDto`, `SurveyResponseDto` |
+
+Open **Schemas** at the bottom of `/docs`, or expand an endpoint → **Request body** to see fields, enums, and examples. After login, click **Authorize** and paste `accessToken`.
+
 **Demo accounts (after DB seed):**
 
 | Role | Email | Password |

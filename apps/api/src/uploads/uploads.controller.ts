@@ -1,5 +1,5 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UploadsService } from './uploads.service';
 import { UploadSignatureDto } from './uploads.dto';
 import { SWAGGER_BEARER_AUTH } from '../common/swagger';
@@ -11,8 +11,10 @@ export class UploadsController {
   constructor(private uploads: UploadsService) {}
 
   @ApiOperation({
-    summary: 'Cloudinary signed upload params (JWT). Requires CLOUDINARY_* env vars.',
+    summary:
+      'Cloudinary signed upload params (JWT). Requires CLOUDINARY_* env vars.',
   })
+  @ApiBody({ type: UploadSignatureDto })
   @Post('signature')
   getSignature(@Body() dto: UploadSignatureDto) {
     return {
