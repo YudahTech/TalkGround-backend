@@ -10,14 +10,14 @@
 
 | Item | Example |
 |------|---------|
-| API base | `https://revyu-api.onrender.com/api/v1` |
-| Swagger | `https://revyu-api.onrender.com/docs` |
-| OpenAPI JSON | `https://revyu-api.onrender.com/docs/openapi.json` |
+| API base | `https://revyu-backend.onrender.com/api/v1` |
+| Swagger | `https://revyu-backend.onrender.com/docs` |
+| OpenAPI JSON | `https://revyu-backend.onrender.com/docs/openapi.json` |
 
 Frontend sets:
 
 ```env
-NEXT_PUBLIC_API_URL=https://revyu-api.onrender.com/api/v1
+NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
 ```
 
 ---
@@ -91,7 +91,7 @@ Paste that as `DATABASE_URL` on the web service (Step 3).
 
 | Setting | Value |
 |---------|--------|
-| **Name** | `revyu-api` |
+| **Name** | `revyu-backend` (live service name) |
 | **Region** | Same as Postgres |
 | **Root Directory** | `apps/api` |
 | **Runtime** | Node |
@@ -180,16 +180,28 @@ https://<your-service-name>.onrender.com/docs
 
 ## Step 5 — Seed the database (once)
 
-Neither Render nor Neon runs seed automatically. From your laptop, point at the **same** DB the API uses:
+### Migrate vs seed (important)
+
+| Command | When it runs | What it does |
+|---------|----------------|--------------|
+| `prisma migrate deploy` | **Every Render start** (in Start Command) | Creates/updates **tables** from `prisma/migrations` |
+| `prisma db seed` | **Manual, once** (not automatic on Render) | Inserts **demo users + brands + reviews** |
+
+Migrations **have been applied** on Neon (your deploy logs showed both migrations succeeding).  
+Seed is **separate** — until you seed, `/home` shows `totalBrands: 0` and demo logins fail.
+
+### Seed Neon from your laptop (once)
+
+Use your Neon connection string (Dashboard → Connection details → URI). **Never commit it.**
 
 ```powershell
 cd apps/api
-# Neon example (recommended):
-$env:DATABASE_URL="postgresql://neondb_owner:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require"
-# Or Render External URL / Supabase URI
+$env:DATABASE_URL="postgresql://neondb_owner:YOUR_PASSWORD@ep-....neon.tech/neondb?sslmode=require"
 npx prisma migrate deploy
 npx prisma db seed
 ```
+
+Then check: `https://revyu-backend.onrender.com/api/v1/home` → `stats.totalBrands` > 0.
 
 See [Neon + Render (recommended)](#neon--render-recommended) for the full Neon checklist.
 
@@ -208,8 +220,8 @@ Plus sample brands (some with `claimed: true`).
 
 | Env | Value |
 |-----|--------|
-| `NEXT_PUBLIC_API_URL` | `https://revyu-api.onrender.com/api/v1` |
-| Swagger (manual testing) | `https://revyu-api.onrender.com/docs` |
+| `NEXT_PUBLIC_API_URL` | `https://revyu-backend.onrender.com/api/v1` |
+| Swagger (manual testing) | `https://revyu-backend.onrender.com/docs` |
 
 If cold start is slow, tell them: wait ~1 minute on first hit after idle.
 
@@ -287,7 +299,7 @@ postgresql://neondb_owner:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=r
 
 ### Env checklist (Render Web Service → Environment)
 
-Set these on `revyu-api` (create the Web Service first if you have not — Steps 2–3 above). **Do not create a Render Postgres** if you use Neon.
+Set these on `revyu-backend` (create the Web Service first if you have not — Steps 2–3 above). **Do not create a Render Postgres** if you use Neon.
 
 | Variable | Required | Example / source |
 |----------|----------|------------------|
@@ -321,7 +333,7 @@ npx prisma db seed
 ### Verify
 
 - [ ] Render logs show Nest started (no Prisma connection errors)
-- [ ] `https://revyu-api.onrender.com/api/v1/home` returns JSON
+- [ ] `https://revyu-backend.onrender.com/api/v1/home` returns JSON
 - [ ] `/docs` → login with seeded user works
 - [ ] Neon dashboard → **Tables** shows `User`, `Brand`, `Review`, etc.
 

@@ -7,22 +7,59 @@
 
 ---
 
+## Frontend handoff (copy these)
+
+| What | Link |
+|------|------|
+| **API base URL** | `https://revyu-backend.onrender.com/api/v1` |
+| **Swagger UI** | https://revyu-backend.onrender.com/docs |
+| **OpenAPI JSON** | https://revyu-backend.onrender.com/docs/openapi.json |
+| **This guide (GitHub)** | https://github.com/YudahTech/Revyu-backend/blob/master/docs/FRONTEND-INTEGRATION.md |
+| **API testing guide** | https://github.com/YudahTech/Revyu-backend/blob/master/docs/API-TESTING-GUIDE.md |
+| **Screen → endpoint map** | https://github.com/YudahTech/Revyu-backend/blob/master/docs/DESIGN-BACKEND-MAPPING.md |
+| **Backend repo** | https://github.com/YudahTech/Revyu-backend |
+
+```env
+NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
+```
+
+**Demo accounts (after DB seed):**
+
+| Role | Email | Password |
+|------|-------|----------|
+| User | `chinedu.okafor@gmail.com` | `demo1234` |
+| Admin | `admin@revyu.ng` | `admin123` |
+
+---
+
 ## 1. Quick start
 
 | Item | Value |
 |------|--------|
 | **API base (local)** | `http://localhost:3001/api/v1` |
-| **API base (Render)** | `https://<your-service>.onrender.com/api/v1` |
-| **Swagger** | `{host}/docs` |
-| **OpenAPI JSON** | `{host}/docs/openapi.json` |
+| **API base (live / Render)** | `https://revyu-backend.onrender.com/api/v1` |
+| **Swagger (live)** | `https://revyu-backend.onrender.com/docs` |
+| **OpenAPI JSON (live)** | `https://revyu-backend.onrender.com/docs/openapi.json` |
 | **Auth header** | `Authorization: Bearer <accessToken>` |
 | **Content-Type** | `application/json` |
+
+### Frontend env
+
+**Local API:**
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1
 ```
 
-CORS: backend `CORS_ORIGIN` must match the frontend origin.
+**Live / staging (Render):**
+
+```env
+NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
+```
+
+CORS: backend `CORS_ORIGIN` on Render must match your frontend origin (e.g. `http://localhost:3000` or your Vercel URL).
+
+> **Cold start:** Render free tier may sleep. First request after idle can take 30–60s — retry once if you see a timeout.
 
 ---
 
@@ -405,7 +442,7 @@ export async function api<T>(
 5. Try protected routes.
 
 ```bash
-npx openapi-typescript https://<host>/docs/openapi.json -o src/lib/api-schema.ts
+npx openapi-typescript https://revyu-backend.onrender.com/docs/openapi.json -o src/lib/api-schema.ts
 ```
 
 ---
