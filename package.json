@@ -1,0 +1,26 @@
+{
+  "name": "revyu",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Revyu — Nigeria's trusted review platform",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev:api": "npm run start:dev --workspace=apps/api",
+    "dev:web": "npm run dev --workspace=apps/web",
+    "build:api": "npm run build --workspace=apps/api",
+    "build:web": "npm run build --workspace=apps/web",
+    "db:migrate": "npm run prisma:migrate --workspace=apps/api",
+    "db:seed": "npm run prisma:seed --workspace=apps/api",
+    "db:studio": "npm run prisma:studio --workspace=apps/api",
+    "docs:pdf": "node scripts/generate-pdfs.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "md-to-pdf": "^5.2.5"
+  }
+}

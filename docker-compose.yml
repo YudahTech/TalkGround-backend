@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: revyu-postgres
+    restart: unless-stopped
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: revyu
+    volumes:
+      - revyu_pg_data:/var/lib/postgresql/data
+
+volumes:
+  revyu_pg_data:

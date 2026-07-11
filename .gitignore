@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build / Nest
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Env & secrets — NEVER commit
+.env
+.env.*
+!.env.example
+apps/*/.env
+apps/*/.env.local
+apps/*/.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Prisma
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal
+
+# Uploads / temp
+tmp/
+temp/
+uploads/
+
+# OpenAPI local export
+apps/api/openapi.json
+
+# Frontend lives in a separate repo — not part of Revyu-backend
+apps/web/
