@@ -3,7 +3,11 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { Roles } from '../common/decorators';
-import { CreateBrandDto, BrandSuggestionDto } from '../brands/brands.dto';
+import {
+  CreateBrandDto,
+  UpdateBrandDto,
+  BrandSuggestionDto,
+} from '../brands/brands.dto';
 import { CurrentUser } from '../common/current-user.decorator';
 import { SWAGGER_BEARER_AUTH } from '../common/swagger';
 
@@ -32,9 +36,13 @@ export class AdminController {
     return this.admin.createBrand(dto);
   }
 
-  @ApiOperation({ summary: 'PATCH /admin/brands/{id} — Update brand' })
+  @ApiOperation({
+    summary: 'PATCH /admin/brands/{id} — Update brand (incl. claimed)',
+    description:
+      'Set claimed:true ONLY after verifying the business. Public users cannot claim.',
+  })
   @Patch('admin/brands/:id')
-  updateBrand(@Param('id') id: string, @Body() dto: Partial<CreateBrandDto>) {
+  updateBrand(@Param('id') id: string, @Body() dto: UpdateBrandDto) {
     return this.admin.updateBrand(id, dto);
   }
 

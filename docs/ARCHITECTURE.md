@@ -16,9 +16,9 @@
                                            │ REST JSON
                                            │ Bearer JWT
                                     ┌──────▼──────┐
-                                    │   NestJS    │
-                                    │   (Railway) │
-                                    │  port 3001  │
+│   NestJS    │
+│  (Render)   │
+│  PORT env   │
                                     └──┬───┬───┬──┘
                          ┌─────────────┘   │   └─────────────┐
                          ▼                 ▼                 ▼
@@ -106,6 +106,12 @@ src/
 | Header | `Authorization: Bearer <token>` |
 | Guards | `JwtAuthGuard` (global) + `RolesGuard` for admin |
 | Public routes | `@Public()` decorator skips JWT |
+
+### Brand claimed badge
+
+`Brand.claimed` is **admin-only** (`PATCH /admin/brands/:id` with `{ claimed: true }`). No public claim endpoint in v1. See [SYSTEM-DESIGN-SECURITY.md](./SYSTEM-DESIGN-SECURITY.md).
+
+**Deploy:** prefer [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md).
 
 ---
 

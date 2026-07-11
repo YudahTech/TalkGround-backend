@@ -2,7 +2,7 @@
 
 **Project:** Revyu  
 **Location:** `c:\Users\USER\Desktop\revyu`  
-**Last updated:** June 2026
+**Last updated:** July 2026
 
 ---
 
@@ -17,6 +17,9 @@
 | **Frontend integration (separate repo)** | [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) + Swagger `http://localhost:3001/docs` |
 | **Testing all API endpoints** | [API-TESTING-GUIDE.md](./API-TESTING-GUIDE.md) |
 | **Adding/finding Swagger endpoints** | [SWAGGER-GUIDE.md](./SWAGGER-GUIDE.md) |
+| **Deploy API to Render (live Swagger)** | [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md) |
+| Deploy API to Railway (legacy) | [RAILWAY-DEPLOYMENT.md](./RAILWAY-DEPLOYMENT.md) |
+| System design + security + claimed | [SYSTEM-DESIGN-SECURITY.md](./SYSTEM-DESIGN-SECURITY.md) |
 | UI screen → endpoint mapping | [DESIGN-BACKEND-MAPPING.md](./DESIGN-BACKEND-MAPPING.md) |
 | Moderating content | [ADMIN-MODERATION-SOP.md](./ADMIN-MODERATION-SOP.md) |
 | Running validation / GTM | [SURVEY-INSTRUMENT.md](./SURVEY-INSTRUMENT.md) + [WAITLIST-INSTRUMENT.md](./WAITLIST-INSTRUMENT.md) |
@@ -49,13 +52,16 @@
 | 9 | [GETTING-STARTED.md](./GETTING-STARTED.md) | Developer onboarding — what was built, how to run |
 | 10 | [ENVIRONMENT-SETUP.md](./ENVIRONMENT-SETUP.md) | Tools, env vars, Docker, external services |
 | 11 | [ARCHITECTURE.md](./ARCHITECTURE.md) | System design, folder structure, data flow |
+| 11b | [SYSTEM-DESIGN-SECURITY.md](./SYSTEM-DESIGN-SECURITY.md) | Design concepts, claimed policy, security |
 | 12 | [DATABASE-SCHEMA.md](./DATABASE-SCHEMA.md) | Tables, relationships, enums |
 | 13 | [API-SPECIFICATION.md](./API-SPECIFICATION.md) | REST API contract |
-| 14 | [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) | **Handoff doc for frontend repo** |
+| 14 | [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) | **Handoff doc for frontend repo** (why + flow) |
 | 15 | [API-TESTING-GUIDE.md](./API-TESTING-GUIDE.md) | Test every endpoint + expected results |
 | 16 | [DESIGN-BACKEND-MAPPING.md](./DESIGN-BACKEND-MAPPING.md) | UI screens → API endpoints |
 | 17 | [DOCKER-SETUP.md](./DOCKER-SETUP.md) | Docker Compose for PostgreSQL |
-| 18 | [DEPLOYMENT-GUIDE.md](./DEPLOYMENT-GUIDE.md) | Staging + production deployment |
+| 18 | [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md) | **Preferred deploy** — Render Web + Postgres |
+| 18b | [RAILWAY-DEPLOYMENT.md](./RAILWAY-DEPLOYMENT.md) | Railway (if you have credit again) |
+| 18c | [DEPLOYMENT-GUIDE.md](./DEPLOYMENT-GUIDE.md) | Staging + production overview |
 | 19 | [IMPLEMENTATION-STATUS.md](./IMPLEMENTATION-STATUS.md) | What's built vs pending |
 | — | **Swagger UI** | `http://localhost:3001/docs` (when API running) |
 | — | **OpenAPI JSON** | `http://localhost:3001/docs/openapi.json` |

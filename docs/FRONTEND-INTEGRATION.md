@@ -2,7 +2,8 @@
 
 **Audience:** Frontend developers (separate repo)  
 **Backend owner:** API team  
-**Last updated:** July 2026
+**Last updated:** July 2026  
+**Deploy target:** Render (see [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md))
 
 ---
 
@@ -10,34 +11,62 @@
 
 | Item | Value |
 |------|--------|
-| **API base URL (local)** | `http://localhost:3001/api/v1` |
-| **Swagger UI (interactive)** | `http://localhost:3001/docs` |
-| **OpenAPI JSON** | `http://localhost:3001/docs/openapi.json` |
-| **Auth** | `Authorization: Bearer <accessToken>` |
+| **API base (local)** | `http://localhost:3001/api/v1` |
+| **API base (Render)** | `https://<your-service>.onrender.com/api/v1` |
+| **Swagger** | `{host}/docs` |
+| **OpenAPI JSON** | `{host}/docs/openapi.json` |
+| **Auth header** | `Authorization: Bearer <accessToken>` |
 | **Content-Type** | `application/json` |
-
-### Frontend env
 
 ```env
 NEXT_PUBLIC_API_URL=http://localhost:3001/api/v1
 ```
 
-CORS: backend `CORS_ORIGIN` must match your frontend origin (default `http://localhost:3000`).
+CORS: backend `CORS_ORIGIN` must match the frontend origin.
 
 ---
 
-## 2. Recommended workflow
+## 2. Whole app flow (product → API)
 
-1. **Read this doc** for auth, errors, and screen → endpoint mapping.
-2. **Use Swagger** at `/docs` to try endpoints and copy request shapes.
-3. **Reference** `API-SPECIFICATION.md` for detailed response examples.
-4. **Reference** `DESIGN-BACKEND-MAPPING.md` for UI screen mapping.
-
-### Generate TypeScript types (optional)
-
-```bash
-npx openapi-typescript http://localhost:3001/docs/openapi.json -o src/lib/api-schema.ts
+```mermaid
+flowchart TD
+  A[Landing /home] --> B[Explore /brands]
+  B --> C[Brand detail /brands/:slug]
+  C --> D{Logged in?}
+  D -->|No| E[Register / Login]
+  E --> F[Write review]
+  D -->|Yes| F
+  F --> G[Optional Cloudinary upload]
+  G --> H[POST /reviews]
+  H --> C
+  C --> I[Helpful / Report]
+  J[Dashboard /users/me/dashboard] --> K[My reviews]
+  L[Admin] --> M[Moderate + claim brands]
 ```
+
+### Guest journey
+
+1. Open app → `GET /home` (hero, trusted cards, sectors, top rated this week).
+2. Explore → `GET /brands/filters` + `GET /brands?...`.
+3. Brand page → `GET /brands/:slug` + `GET /brands/:slug/reviews`.
+4. Public profile → `GET /users/:username`.
+5. To write a review → prompt login.
+
+### Logged-in user journey
+
+1. `POST /auth/login` or `register` → store `accessToken`.
+2. Brand page → `GET /brands/:slug/context` → **Write** vs **Edit**.
+3. Submit → `POST /reviews` (or `PATCH /reviews/:id`).
+4. Photos (optional) → signature → Cloudinary → `POST /reviews/:id/media`.
+5. Dashboard → `GET /users/me/dashboard`.
+6. Settings → `GET/PATCH /users/me`.
+
+### Admin journey
+
+1. Login as `admin@revyu.ng` (after seed).
+2. Queues → `GET /admin/reviews/queue`.
+3. Actions → `PATCH /admin/reviews/:id`.
+4. **Claim a brand** → `PATCH /admin/brands/:id` `{ "claimed": true }` (admin only).
 
 ---
 
@@ -49,7 +78,7 @@ npx openapi-typescript http://localhost:3001/docs/openapi.json -o src/lib/api-sc
 { "data": { ... } }
 ```
 
-Paginated lists:
+Paginated:
 
 ```json
 {
@@ -71,188 +100,237 @@ Paginated lists:
 
 | Status | Meaning | Frontend action |
 |--------|---------|-----------------|
-| 400 | Invalid body/query | Show `error.message` |
-| 401 | Not logged in / bad token | Clear token → redirect `/login` |
-| 403 | Forbidden (role or not verified) | Show message; phone verify flow if needed |
+| 400 | Bad input | Show `error.message` |
+| 401 | Missing/invalid JWT | Clear token → `/login` |
+| 403 | Wrong role / suspended | Show message |
 | 404 | Not found | Empty state |
-| 409 | Conflict (duplicate email/review) | Show message |
-| 503 | Service unavailable (e.g. Cloudinary off) | Disable upload UI |
+| 409 | Conflict (duplicate) | Show message |
+| 503 | Cloudinary not configured | Hide upload UI |
 
 ---
 
-## 4. Authentication
-
-### Register
-
-```http
-POST /auth/register
-```
-
-```json
-{
-  "email": "user@example.com",
-  "password": "securePass123",
-  "displayName": "Ada O.",
-  "username": "ada_o",
-  "phone": "+2348012345678"
-}
-```
-
-**Response:** `{ data: { accessToken, refreshToken, user, message } }`
-
-### Login
-
-```http
-POST /auth/login
-```
-
-```json
-{ "email": "user@example.com", "password": "securePass123" }
-```
-
-### Store token
-
-```typescript
-localStorage.setItem('revyu_token', data.accessToken);
-```
-
-### Attach to requests
-
-```typescript
-headers: {
-  'Content-Type': 'application/json',
-  Authorization: `Bearer ${token}`,
-}
-```
-
-### Phone verification (optional for now)
-
-OTP endpoints still exist (`/auth/verify-phone/*`) for later Termii setup.
-
-**v1 access model:** a valid JWT is enough for normal user actions (write review, helpful vote, dashboard, profile). Phone/email verification is **not** enforced.
-
-Admin routes still require `role: ADMIN`.
-
-### Test accounts (after `npm run db:seed`)
-
-| Role | Email | Password |
-|------|-------|----------|
-| Demo user | `chinedu.okafor@gmail.com` | `demo1234` |
-| Admin | `admin@revyu.ng` | `admin123` |
-
-Demo user is already phone-verified and can write reviews immediately.
-
----
-
-## 5. Public vs protected routes
-
-| Access | Routes |
-|--------|--------|
-| **Public** | `GET /home`, `GET /brands*`, `GET /brands/:slug/reviews`, `GET /users/:username`, `POST /auth/register`, `POST /auth/login`, `POST /reviews/:id/view` |
-| **Optional JWT** | `GET /brands/:slug/reviews` — if token sent, each review includes `helpfulByMe` |
-| **JWT required** | `POST /reviews`, `GET /users/me/*`, `PATCH /users/me`, `POST /uploads/signature`, `POST /reviews/:id/helpful`, brand context |
-| **Admin JWT** | All `/admin/*`, `GET /waitlist/stats` |
-
-**UX rule:** Browse brands and reviews **without** login. Prompt login for write review, dashboard, profile, helpful vote. **Do not** block review submit on phone OTP in v1.
-
----
-
-## Access model (v1 — for frontend)
+## 4. Access model (v1)
 
 | Who | Can do |
 |-----|--------|
-| Guest (no token) | Home, explore brands, brand detail, read reviews, public profile, register/login |
-| Logged-in USER | Everything guest can + write/edit/delete own reviews, helpful, report, dashboard, profile, suggest brand |
-| ADMIN | Everything above + `/admin/*` moderation |
+| Guest | Home, explore, brand detail, read reviews, public profile, register/login |
+| USER (JWT) | Write/edit/delete own reviews, helpful, report, dashboard, profile, suggest brand |
+| ADMIN | Everything USER + all `/admin/*` including **setting `claimed`** |
 
-OTP / email verification screens can be built later; they are **not** required for the current API.
+Phone/email OTP is **not** required to write reviews in v1. OTP endpoints exist for later Termii.
 
 ---
 
-## 6. Screen → API mapping
+## 5. Brand “Claimed” badge — frontend rules
 
-### Landing page
+| Field | Meaning |
+|-------|---------|
+| `claimed: true` | Revyu verified the business offline; show Claimed badge |
+| `claimed: false` | Unclaimed listing |
 
-| UI section | Endpoint |
-|------------|----------|
-| Hero | `GET /home` → `data.hero` |
-| Category chips | `data.categories` + `?category=restaurants\|hotels` |
-| Find trusted brands cards | `data.trustedBrandCards` |
-| Popular sectors grid | `data.sectorBrands` (`?sectorLimit=4`) |
-| Top rated this week | `data.topRatedThisWeek` |
-| Search | `GET /home?q=...` or navigate to `/brands?q=...` |
+**How it becomes true:** only an admin updates the brand. There is **no** public “Claim my business” button wired to the API in v1. Do not invent a claim form that hits a non-existent endpoint.
 
-### Explore / brands page
+Trust score already includes +10 when claimed — you can show `trustScore` / `trustLabel` from the API.
+
+---
+
+## 6. Endpoint catalog (why + what)
+
+Base path: `/api/v1` (omit in tables below).
+
+### 6.1 Auth — identity
+
+| Method | Path | Auth | Why it exists | What it does |
+|--------|------|------|---------------|--------------|
+| `POST` | `/auth/register` | Public | Create accounts | Hashes password, creates USER, returns JWT + user |
+| `POST` | `/auth/login` | Public | Session start | Validates email/password, returns JWT + user |
+| `POST` | `/auth/forgot-password` | Public | Password recovery stub | Placeholder until Resend email is wired |
+| `POST` | `/auth/verify-phone/send-otp` | JWT | Future SMS gate | Sends OTP (or logs in `OTP_DEV_MODE`) |
+| `POST` | `/auth/verify-phone/confirm-otp` | JWT | Future SMS gate | Confirms OTP, marks phone verified |
+
+**UI:** Login/Register screens. Store `data.accessToken`. Attach on every protected call.
+
+---
+
+### 6.2 Home — landing page
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `GET` | `/home` | Public | One call for landing composition | Returns hero, categories, `trustedBrandCards`, `sectorBrands`, `topRatedThisWeek`, featured reviews alias |
+
+**Query (useful):** `?category=restaurants|hotels`, `?q=...`, `?sectorLimit=4`
+
+**UI:** Landing only — do not over-fetch brands list for the first viewport if `/home` already has cards.
+
+---
+
+### 6.3 Brands — explore & detail
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `GET` | `/brands/filters` | Public | Sidebar without guessing | Cities, categories, ratings buckets **with live counts** |
+| `GET` | `/brands` | Public | Explore grid / search | Paginated brands; query: `q`, `city`, `category`, `minRating`, `sort`, `page`, `limit` |
+| `GET` | `/brands/:slug` | Public | Brand profile page | Detail: ratings, trust, `claimed`, breakdown, tags, etc. |
+| `GET` | `/brands/:slug/context` | JWT | Write vs Edit UX | `{ userHasReviewed, reviewId }` |
+
+**Enums in query strings:** lowercase (`lagos`, `restaurants`) — API normalizes.
+
+**UI rules:**
+
+- Guest can open brand pages.
+- Before “Write review”, call `context` if logged in; else send to login.
+- Show Claimed badge from `claimed`.
+
+---
+
+### 6.4 Reviews — UGC core
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `GET` | `/brands/:slug/reviews` | Public / optional JWT | Brand review feed | Paginated reviews; `sort=recent\|rating_high\|rating_low\|helpful\|verified_first`; with JWT → `helpfulByMe` |
+| `POST` | `/reviews` | JWT | Create review | Body: `brandId`, `rating`, `title`, `body`, optional `pros`, `cons`, `recommend` |
+| `PATCH` | `/reviews/:id` | JWT (owner) | Edit own review | Partial update |
+| `DELETE` | `/reviews/:id` | JWT (owner) | Remove own review | Soft/hard per service rules |
+| `POST` | `/reviews/:id/media` | JWT | Attach photo/receipt URL | After Cloudinary upload: `{ url, type: "photo"\|"receipt" }` |
+| `POST` | `/reviews/:id/helpful` | JWT | Community signal | Toggle/add helpful vote |
+| `POST` | `/reviews/:id/report` | JWT | Safety | `{ reason, details? }` → moderation |
+| `POST` | `/reviews/:id/view` | Public | Analytics | Increment view counter |
+
+**Why no anonymous reviews:** trust + one-review-per-user-per-brand.
+
+---
+
+### 6.5 Users — me + public profile
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `GET` | `/users/me` | JWT | Settings screen | Current profile |
+| `PATCH` | `/users/me` | JWT | Save settings | `displayName`, `username`, `avatarUrl`, bio fields as allowed |
+| `GET` | `/users/me/dashboard` | JWT | Personal dashboard | Stats (`reviewsThisWeek`, `helpfulVotesThisWeek`, …) + recent reviews |
+| `GET` | `/users/me/reviews` | JWT | “My reviews” list | Paginated own reviews |
+| `GET` | `/users/:username` | Public | Public reviewer profile | Safe public fields + reviews |
+
+**Route order note:** `me` routes are registered before `:username` so `me` is not treated as a username.
+
+---
+
+### 6.6 Uploads — media pipeline
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `POST` | `/uploads/signature` | JWT | Secure direct-to-Cloudinary | Returns signed params; browser uploads file; API never holds the binary |
+
+Body: `{ "folder": "reviews" | "receipts" | "brands" }`
+
+Without Cloudinary env → **503**. Text-only reviews still work.
+
+**Flow:**
+
+1. `POST /uploads/signature`
+2. Multipart upload to Cloudinary from the browser
+3. `POST /reviews/:id/media` with the CDN URL  
+   or `PATCH /users/me` with `avatarUrl`
+
+---
+
+### 6.7 Growth — survey & waitlist
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `POST` | `/survey/responses` | Public* | GTM validation | Store survey answers |
+| `POST` | `/waitlist` | Public | Launch list | Email/phone waitlist entry |
+| `GET` | `/waitlist/stats` | Admin | Internal metrics | Counts for founders |
+
+\*Confirm Swagger for exact auth; treat as public marketing forms unless tagged otherwise.
+
+---
+
+### 6.8 Brand suggestions
+
+| Method | Path | Auth | Why | What |
+|--------|------|------|-----|------|
+| `POST` | `/brand-suggestions` | JWT | Users request missing venues | Creates pending suggestion for admin |
+
+Admin then approves via `/admin/suggestions/:id`.
+
+---
+
+### 6.9 Admin — moderation & claims
+
+All require JWT + `role: ADMIN`.
+
+| Method | Path | Why | What |
+|--------|------|-----|------|
+| `GET` | `/admin/dashboard` | Ops overview | Counts: brands, reviews, flags, etc. |
+| `GET` | `/admin/brands` | Manage catalog | All brands |
+| `POST` | `/admin/brands` | Add venue | Create brand; optional `claimed` |
+| `PATCH` | `/admin/brands/:id` | Edit + **claim** | Update fields including `{ "claimed": true\|false }` |
+| `DELETE` | `/admin/brands/:id` | Soft remove | Deactivate brand |
+| `GET` | `/admin/reviews/queue` | Moderation inbox | `?queue=flagged\|reported\|pending_receipt\|suspended` |
+| `PATCH` | `/admin/reviews/:id` | Moderate | `{ action: approve\|suspend\|remove\|dismiss_report\|verify_receipt, note?, approved? }` |
+| `GET` | `/admin/suggestions` | Missing-brand inbox | Pending suggestions |
+| `PATCH` | `/admin/suggestions/:id` | Resolve | `{ status: approved\|rejected, adminNote? }` |
+| `PATCH` | `/admin/users/:id/suspend` | Abuse control | `{ suspended, reason }` |
+
+**Claim example:**
+
+```http
+PATCH /api/v1/admin/brands/{id}
+Authorization: Bearer <adminToken>
+
+{ "claimed": true }
+```
+
+---
+
+## 7. Screen → API mapping
+
+### Landing
 
 | UI | Endpoint |
 |----|----------|
-| Sidebar filters + counts | `GET /brands/filters` |
-| Brand grid | `GET /brands?q=&city=&category=&minRating=&sort=&page=&limit=` |
-| Card click | Navigate to `/brands/:slug` → `GET /brands/:slug` |
+| Hero + sections | `GET /home` |
+| Trusted cards | `data.trustedBrandCards` |
+| Sectors | `data.sectorBrands` |
+| Top rated week | `data.topRatedThisWeek` |
+
+### Explore
+
+| UI | Endpoint |
+|----|----------|
+| Filter sidebar | `GET /brands/filters` |
+| Grid | `GET /brands?...` |
 
 ### Brand detail
 
 | UI | Endpoint |
 |----|----------|
-| Header, trust score, rating bars | `GET /brands/:slug` |
-| Reviews list | `GET /brands/:slug/reviews?sort=recent&page=1` |
-| Write review button | `GET /brands/:slug/context` (JWT) → `userHasReviewed` |
+| Header / trust / claimed | `GET /brands/:slug` |
+| Reviews | `GET /brands/:slug/reviews?sort=&page=` |
+| Write/Edit button | `GET /brands/:slug/context` |
 
-### Submit review
+### Review form
 
 | Step | Endpoint |
 |------|----------|
-| Load brand | `GET /brands/:slug` |
-| Submit | `POST /reviews` with `brandId`, `rating`, `title`, `body`, `pros`, `cons`, `recommend` |
-| Photos (optional) | See upload flow below |
+| Submit | `POST /reviews` |
+| Edit | `PATCH /reviews/:id` |
+| Photos | signature → Cloudinary → `POST /reviews/:id/media` |
 
-### Dashboard
-
-| UI | Endpoint |
-|----|----------|
-| Stats | `GET /users/me/dashboard` → `data.stats` |
-| Recent reviews | `data.recentReviews` |
-
-### Profile settings
+### Dashboard / settings
 
 | UI | Endpoint |
 |----|----------|
-| Load | `GET /users/me` |
-| Save | `PATCH /users/me` |
+| Stats | `GET /users/me/dashboard` |
+| Profile | `GET/PATCH /users/me` |
 
----
+### Admin panel
 
-## 7. Cloudinary upload flow
-
-**Early dev:** Skip photos — text reviews work without Cloudinary.
-
-When ready:
-
-1. `POST /uploads/signature` + JWT  
-   Body: `{ "folder": "reviews" | "receipts" | "brands" }`
-
-2. Response:
-   ```json
-   {
-     "data": {
-       "cloudName": "...",
-       "apiKey": "...",
-       "timestamp": 1234567890,
-       "signature": "...",
-       "folder": "revyu/reviews"
-     }
-   }
-   ```
-
-3. Upload file **from browser** to Cloudinary (multipart form).
-
-4. Attach URL to review:
-   ```http
-   POST /reviews/:id/media
-   { "url": "https://res.cloudinary.com/.../image.jpg", "type": "photo" }
-   ```
-
-5. Avatar: `PATCH /users/me` with `{ "avatarUrl": "https://..." }`
+| UI | Endpoint |
+|----|----------|
+| Stats | `GET /admin/dashboard` |
+| Flagged list | `GET /admin/reviews/queue` |
+| Claim brand | `PATCH /admin/brands/:id` `{ claimed: true }` |
 
 ---
 
@@ -272,7 +350,11 @@ export async function api<T>(
   };
   if (token) headers.Authorization = `Bearer ${token}`;
 
-  const res = await fetch(`${API_URL}${path}`, { ...options, headers, cache: 'no-store' });
+  const res = await fetch(`${API_URL}${path}`, {
+    ...options,
+    headers,
+    cache: 'no-store',
+  });
   const json = await res.json().catch(() => ({}));
 
   if (!res.ok) {
@@ -284,44 +366,56 @@ export async function api<T>(
 
 ---
 
-## 9. Product scope (v1)
+## 9. Test accounts (after seed)
 
-- **Categories:** Restaurants (Dining) and Hotels only
-- **Cities:** Lagos and Abuja only
-- **Enums:** Use lowercase in query strings (`lagos`, `restaurants`) — API transforms to DB enums
+| Role | Email | Password |
+|------|-------|----------|
+| Demo user | `chinedu.okafor@gmail.com` | `demo1234` |
+| Admin | `admin@revyu.ng` | `admin123` |
 
 ---
 
-## 10. What is NOT required for v1 frontend
+## 10. Product scope (v1)
+
+- Categories: **Restaurants** + **Hotels** only  
+- Cities: **Lagos** + **Abuja** only  
+- Query enums: lowercase  
+- Claimed: **admin-only**  
+
+---
+
+## 11. Not required for v1 frontend
 
 | Feature | Status |
 |---------|--------|
-| Termii SMS | Optional later — **not required** to write reviews in v1 |
-| Cloudinary | Optional — text-only reviews |
-| Resend email | Not implemented — forgot-password is placeholder |
-| Review comments | Not in API — use `helpfulCount` only |
-| Refresh token flow | `refreshToken` equals `accessToken` for now |
+| Termii SMS | Optional — not required to review |
+| Cloudinary | Optional — text reviews work |
+| Resend email | Forgot-password placeholder |
+| Public “claim business” UI | **Do not build against API yet** |
+| Refresh token rotation | Same token for now |
 
 ---
 
-## 11. Backend contact / changes
+## 12. Swagger workflow
 
-- Breaking API changes: bump version or notify frontend via changelog
-- Staging URL: TBD — update `NEXT_PUBLIC_API_URL` per environment
-- Questions: refer to Swagger + `API-SPECIFICATION.md`
-
----
-
-## 12. Swagger quick guide
-
-1. Start API: `npm run dev:api`
-2. Open `http://localhost:3001/docs`
-3. Call `POST /auth/login` → copy `accessToken` from response `data`
-4. Click **Authorize** → paste token only (no `Bearer ` prefix)
-5. Try protected endpoints
-
-Export spec for codegen:
+1. Start API (local or open Render URL).
+2. Open `/docs`.
+3. `POST /auth/login` → copy `data.accessToken`.
+4. **Authorize** → paste token (no `Bearer ` prefix).
+5. Try protected routes.
 
 ```bash
-curl http://localhost:3001/docs/openapi.json -o openapi.json
+npx openapi-typescript https://<host>/docs/openapi.json -o src/lib/api-schema.ts
 ```
+
+---
+
+## 13. Related docs
+
+| Doc | Use |
+|-----|-----|
+| [SYSTEM-DESIGN-SECURITY.md](./SYSTEM-DESIGN-SECURITY.md) | Architecture + security + claimed policy |
+| [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md) | Deploy API on Render |
+| [API-SPECIFICATION.md](./API-SPECIFICATION.md) | Detailed payloads |
+| [API-TESTING-GUIDE.md](./API-TESTING-GUIDE.md) | Manual test checklist |
+| [DESIGN-BACKEND-MAPPING.md](./DESIGN-BACKEND-MAPPING.md) | Screen mapping |

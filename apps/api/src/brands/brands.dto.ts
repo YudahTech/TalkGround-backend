@@ -55,6 +55,69 @@ export class CreateBrandDto {
 
   @IsString()
   area: string;
+
+  /** Only settable by ADMIN via create/update — never by public users */
+  @IsOptional()
+  @IsBoolean()
+  claimed?: boolean;
+}
+
+/** Admin PATCH body — all fields optional; `claimed` is admin-only */
+export class UpdateBrandDto {
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @IsOptional()
+  @IsString()
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  description?: string;
+
+  @IsOptional()
+  @IsUrl()
+  logoUrl?: string;
+
+  @IsOptional()
+  @IsUrl()
+  website?: string;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase() : value,
+  )
+  @IsEnum(BrandCategory)
+  category?: BrandCategory;
+
+  @IsOptional()
+  @IsString()
+  subType?: string;
+
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.toUpperCase() : value,
+  )
+  @IsEnum(City)
+  city?: City;
+
+  @IsOptional()
+  @IsString({ each: true })
+  tags?: string[];
+
+  @IsOptional()
+  @IsString()
+  area?: string;
+
+  /**
+   * Claimed badge: ONLY Revyu admins may set this.
+   * There is no public “claim my business” endpoint in v1.
+   * Set true after offline verification (call / email / docs).
+   */
+  @IsOptional()
+  @IsBoolean()
+  claimed?: boolean;
 }
 
 export class BrandQueryDto {

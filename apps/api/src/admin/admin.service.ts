@@ -10,7 +10,7 @@ import {
   SuggestionStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { CreateBrandDto } from '../brands/brands.dto';
+import { CreateBrandDto, UpdateBrandDto } from '../brands/brands.dto';
 import { slugify } from '../common/utils';
 
 @Injectable()
@@ -67,7 +67,9 @@ export class AdminService {
     return { data: brand };
   }
 
-  async updateBrand(id: string, dto: Partial<CreateBrandDto>) {
+  async updateBrand(id: string, dto: UpdateBrandDto) {
+    const existing = await this.prisma.brand.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Brand not found');
     const brand = await this.prisma.brand.update({ where: { id }, data: dto });
     return { data: brand };
   }
