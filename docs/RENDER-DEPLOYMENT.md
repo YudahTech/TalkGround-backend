@@ -95,21 +95,21 @@ Paste that as `DATABASE_URL` on the web service (Step 3).
 | **Region** | Same as Postgres |
 | **Root Directory** | `apps/api` |
 | **Runtime** | Node |
-| **Build Command** | `npm install && npx prisma generate && npm run build` |
-| **Start Command** | `npx prisma migrate deploy && npm run start:prod` |
+| **Build Command** | `npm install && npx prisma@5.22.0 generate && npm run build` |
+| **Start Command** | `npx prisma@5.22.0 migrate deploy && npm run start:prod` |
 | **Instance type** | Free |
 
 ### Why these commands?
 
 | Command | Purpose |
 |---------|---------|
-| `npm install` | Install deps including **prisma 5.22** (needed on Render) |
-| `npx prisma generate` | Generate Prisma Client using the **local** Prisma 5 CLI |
+| `npm install` | Install deps from `apps/api` (see `.npmrc` — no monorepo workspace hoist) |
+| `npx prisma@5.22.0 generate` | **Force Prisma 5** — bare `npx prisma` can download 7 and fail with P1012 |
 | `npm run build` | Compile Nest → `dist/` |
-| `npx prisma migrate deploy` | Apply SQL migrations to Neon/Render Postgres |
+| `npx prisma@5.22.0 migrate deploy` | Apply SQL migrations to Neon/Render Postgres |
 | `npm run start:prod` | `node dist/main` |
 
-**Important:** This project uses **Prisma 5** (`url = env("DATABASE_URL")` in `schema.prisma`). Do **not** let Render run Prisma 7 — it rejects that schema style (`P1012`). `prisma` is pinned in `dependencies` so `npx prisma` uses 5.22.0 after `npm install`.
+**Important:** This project uses **Prisma 5** (`url = env("DATABASE_URL")` in `schema.prisma`). Always pin `@5.22.0` in Render commands until you deliberately upgrade to Prisma 7.
 
 **Docker note:** Local Docker only runs **Postgres** on port 5433. Render does **not** use that Docker container. On Render/Neon you only set `DATABASE_URL` to the cloud database.
 
