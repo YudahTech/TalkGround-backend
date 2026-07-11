@@ -24,21 +24,25 @@ NEXT_PUBLIC_API_URL=https://revyu-api.onrender.com/api/v1
 
 ## Architecture on Render
 
+**Recommended for demos:** Nest on Render + Postgres on Neon (or Supabase).
+
 ```
 GitHub (YudahTech/Revyu-backend)
         │
         ▼
-┌───────────────────┐     private URL      ┌─────────────────┐
-│  Web Service      │ ───────────────────► │  PostgreSQL     │
-│  NestJS (apps/api)│                      │  Render DB      │
-│  PORT = injected  │                      └─────────────────┘
-└───────────────────┘
+┌───────────────────┐     DATABASE_URL (SSL)    ┌─────────────────┐
+│  Web Service      │ ─────────────────────────► │  Postgres       │
+│  NestJS (apps/api)│                            │  Neon / Supabase│
+│  PORT = injected  │                            │  (or Render DB) │
+└───────────────────┘                            └─────────────────┘
         │
         ▼ HTTPS
    Swagger /docs + REST /api/v1
 ```
 
-Render free tier: web services **spin down** after ~15 minutes idle. First request after sleep can take 30–60s. Fine for demos; upgrade later for always-on.
+Render free web services **spin down** after ~15 minutes idle. First request after sleep can take 30–60s. Fine for demos; upgrade later for always-on.
+
+Prisma only needs a valid `DATABASE_URL` — it does not care whether Postgres is on Render, Neon, or Supabase.
 
 ---
 
@@ -50,29 +54,32 @@ Render free tier: web services **spin down** after ~15 minutes idle. First reque
 
 ---
 
-## Step 1 — Create PostgreSQL
+## Step 1 — Choose Postgres (pick one)
+
+| Option | When to use |
+|--------|-------------|
+| **A — Neon (recommended for demos)** | Free DB that lasts longer; skip Render Postgres |
+| **B — Supabase** | Same idea as Neon; use if you already have Supabase |
+| **C — Render Postgres** | Quick all-in-one; free tier can expire after inactivity |
+
+For long-term demos, prefer **A** or **B**. Jump to [Neon + Render (recommended)](#neon--render-recommended) if you want that path only, then return here for the Web Service steps.
+
+### Option C — Render PostgreSQL (optional)
 
 1. Dashboard → **New +** → **PostgreSQL**
 2. Name: `revyu-db`
 3. Database: `revyu` (or leave default)
 4. Region: closest to you (e.g. Frankfurt / Oregon)
-5. Plan: **Free** (or paid if you need persistence beyond free limits)
+5. Plan: **Free** (or paid if you need persistence)
 6. Create → wait until **Available**
-
-### Copy connection string
-
-Open the DB → **Connections** → copy **Internal Database URL** (preferred when API is on Render)  
-or **External Database URL** if you need to connect from your laptop.
-
-Format looks like:
+7. **Connections** → copy **Internal Database URL** (for the Web Service)  
+   and **External Database URL** (for seeding from your laptop)
 
 ```text
 postgresql://USER:PASSWORD@HOST/DATABASE
 ```
 
-You will paste this as `DATABASE_URL` on the web service.
-
-> Free Postgres on Render can expire after inactivity. For long-term demos, use a paid DB or Neon/Supabase free Postgres and point `DATABASE_URL` there.
+Paste that as `DATABASE_URL` on the web service (Step 3).
 
 ---
 
@@ -88,7 +95,7 @@ You will paste this as `DATABASE_URL` on the web service.
 | **Region** | Same as Postgres |
 | **Root Directory** | `apps/api` |
 | **Runtime** | Node |
-| **Build Command** | `npx prisma generate && npm run build` |
+| **Build Command** | `npm install && npx prisma generate && npm run build` |
 | **Start Command** | `npx prisma migrate deploy && npm run start:prod` |
 | **Instance type** | Free |
 
@@ -96,10 +103,15 @@ You will paste this as `DATABASE_URL` on the web service.
 
 | Command | Purpose |
 |---------|---------|
-| `npx prisma generate` | Generate Prisma Client for production |
+| `npm install` | Install deps including **prisma 5.22** (needed on Render) |
+| `npx prisma generate` | Generate Prisma Client using the **local** Prisma 5 CLI |
 | `npm run build` | Compile Nest → `dist/` |
-| `npx prisma migrate deploy` | Apply SQL migrations to Render Postgres |
+| `npx prisma migrate deploy` | Apply SQL migrations to Neon/Render Postgres |
 | `npm run start:prod` | `node dist/main` |
+
+**Important:** This project uses **Prisma 5** (`url = env("DATABASE_URL")` in `schema.prisma`). Do **not** let Render run Prisma 7 — it rejects that schema style (`P1012`). `prisma` is pinned in `dependencies` so `npx prisma` uses 5.22.0 after `npm install`.
+
+**Docker note:** Local Docker only runs **Postgres** on port 5433. Render does **not** use that Docker container. On Render/Neon you only set `DATABASE_URL` to the cloud database.
 
 **Do not set `PORT` yourself.** Render injects `PORT`. Nest already uses `process.env.PORT ?? 3001`.
 
@@ -113,7 +125,7 @@ Web Service → **Environment** → add:
 
 | Variable | Value | Notes |
 |----------|--------|--------|
-| `DATABASE_URL` | Internal (or External) Postgres URL from Step 1 | Must include `?schema=public` if you use schemas; Prisma usually works with Render’s URL as-is |
+| `DATABASE_URL` | Neon / Supabase URI **or** Render Internal URL | Prefer Neon for demos; must be reachable from Render (SSL usually required) |
 | `JWT_SECRET` | Long random string | Generate below — never commit |
 | `JWT_EXPIRES_IN` | `7d` | Same as local |
 | `CORS_ORIGIN` | Your frontend origin | e.g. `http://localhost:3000` or `https://revyu.vercel.app` |
@@ -166,16 +178,18 @@ https://<your-service-name>.onrender.com/docs
 
 ## Step 5 — Seed the database (once)
 
-Render does **not** run seed automatically. From your laptop (with External `DATABASE_URL`):
+Neither Render nor Neon runs seed automatically. From your laptop, point at the **same** DB the API uses:
 
 ```powershell
 cd apps/api
-$env:DATABASE_URL="postgresql://...external-url-from-render..."
+# Neon example (recommended):
+$env:DATABASE_URL="postgresql://neondb_owner:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require"
+# Or Render External URL / Supabase URI
 npx prisma migrate deploy
 npx prisma db seed
 ```
 
-Or add a one-off **Shell** / temporary job on Render if available on your plan.
+See [Neon + Render (recommended)](#neon--render-recommended) for the full Neon checklist.
 
 Seed creates:
 
@@ -214,22 +228,122 @@ If cold start is slow, tell them: wait ~1 minute on first hit after idle.
 
 | Problem | Fix |
 |---------|-----|
-| Build fails on Prisma | Root Directory must be `apps/api`; run `prisma generate` in build |
+| Build fails on Prisma | Root Directory must be `apps/api`; run `npm install` then `prisma generate` |
+| `P1012` / Prisma 7.x / `url is no longer supported` | Project is Prisma **5**. Ensure `prisma` is in dependencies (done) and Build Command starts with `npm install`. Redeploy after pushing. Do not upgrade to Prisma 7 on Render. |
 | App crashes on start | Check `DATABASE_URL`; ensure migrate deploy ran |
 | 502 / sleep | Free tier cold start — wait and retry |
 | CORS errors | Set `CORS_ORIGIN` to exact frontend origin (scheme + host + port) |
-| Empty DB | Run seed against External URL |
+| Empty DB | Run seed against Neon/External URL |
 | Wrong port | Do not set `PORT` manually |
+| Thinking Docker fixes Render | Docker is local only; cloud uses `DATABASE_URL` (Neon/Render Postgres) |
 
 ---
 
-## Neon / Supabase alternative for Postgres
+## Neon + Render (recommended)
 
-If Render free Postgres is too limited:
+Use this when you want a **stable free demo DB**. Nest stays on Render; only Postgres moves to Neon. **No code changes** — only env vars.
 
-1. Create free Postgres on [Neon](https://neon.tech) or [Supabase](https://supabase.com)
-2. Copy connection string → `DATABASE_URL` on Render web service
-3. Keep Nest on Render; only DB is external
+### Why this setup
+
+| Point | Detail |
+|-------|--------|
+| Stable demos | Neon free DB is less likely to vanish from short inactivity than Render free Postgres |
+| Split roles | Render runs the API; Neon stores data |
+| Portable | Later move Nest anywhere; keep the same Neon `DATABASE_URL` |
+| Same Prisma flow | `migrate deploy` + `db seed` work unchanged |
+
+### How it works
+
+1. Neon hosts Postgres and gives you a connection URI.
+2. Render Web Service env `DATABASE_URL` points at that URI over the public internet (SSL).
+3. On each deploy, `prisma migrate deploy` applies migrations **on Neon**.
+4. Your laptop can use the **same** URI to seed or run Prisma Studio.
+
+```
+Your laptop ──┐
+              ├── DATABASE_URL ──► Neon Postgres
+Render API  ──┘
+```
+
+### Neon setup (click-through)
+
+1. Open [https://console.neon.tech](https://console.neon.tech) → sign up with GitHub.
+2. **Create project**
+   - Name: `revyu`
+   - Region: closest to your Render region (e.g. both EU or both US)
+   - Postgres version: default is fine
+3. After create, open **Dashboard** → **Connection details**.
+4. Select connection string type **URI**.
+5. Copy the string. It should look like:
+
+```text
+postgresql://neondb_owner:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require
+```
+
+6. Prefer the **direct** connection (host like `ep-....neon.tech`) for Nest/Prisma.  
+   If Neon shows a **pooled** URL (`-pooler`), it often works too; if migrations fail, switch to the non-pooler URI.
+
+### Env checklist (Render Web Service → Environment)
+
+Set these on `revyu-api` (create the Web Service first if you have not — Steps 2–3 above). **Do not create a Render Postgres** if you use Neon.
+
+| Variable | Required | Example / source |
+|----------|----------|------------------|
+| `DATABASE_URL` | Yes | Full Neon URI with `sslmode=require` |
+| `JWT_SECRET` | Yes | `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"` |
+| `JWT_EXPIRES_IN` | Yes | `7d` |
+| `CORS_ORIGIN` | Yes | `http://localhost:3000` or your Vercel URL |
+| `OTP_DEV_MODE` | Yes (early) | `true` |
+| `PORT` | **No** | Render injects this — leave unset |
+| `TERMII_*` | No | Later |
+| `CLOUDINARY_*` | No | Later |
+
+After saving env vars → **Manual Deploy** → **Deploy latest commit**.
+
+### Seed Neon from your laptop (once)
+
+Use the **same** Neon URI (safe on your machine; never commit it):
+
+```powershell
+cd apps\api
+$env:DATABASE_URL="postgresql://neondb_owner:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=require"
+npx prisma migrate deploy
+npx prisma db seed
+```
+
+| Email | Password | Role |
+|-------|----------|------|
+| `chinedu.okafor@gmail.com` | `demo1234` | USER |
+| `admin@revyu.ng` | `admin123` | ADMIN |
+
+### Verify
+
+- [ ] Render logs show Nest started (no Prisma connection errors)
+- [ ] `https://revyu-api.onrender.com/api/v1/home` returns JSON
+- [ ] `/docs` → login with seeded user works
+- [ ] Neon dashboard → **Tables** shows `User`, `Brand`, `Review`, etc.
+
+### Neon tips
+
+| Tip | Detail |
+|-----|--------|
+| First query slow | Neon can scale to zero; wait a few seconds on cold start |
+| Password reset | Neon console → reset role password → update Render `DATABASE_URL` |
+| Local vs cloud | You can keep local Docker Postgres for day-to-day; use Neon only for the live API |
+| Don’t mix DBs | One `DATABASE_URL` per environment — don’t point Render at local `localhost` |
+
+---
+
+## Supabase + Render (alternative)
+
+Same pattern as Neon; only the URI source changes.
+
+1. [https://supabase.com](https://supabase.com) → New project → wait until healthy.
+2. **Project Settings → Database → Connection string → URI**.
+3. Replace `[YOUR-PASSWORD]` with the DB password you set at project creation.
+4. For Nest/Prisma, prefer the **direct** connection (port `5432`) over transaction pooler when running migrations.
+5. Paste into Render `DATABASE_URL` and use the same env checklist as Neon.
+6. Seed from your laptop with that URI (`migrate deploy` + `db seed`).
 
 ---
 
