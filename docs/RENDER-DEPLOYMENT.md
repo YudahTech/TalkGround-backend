@@ -97,6 +97,8 @@ Paste that as `DATABASE_URL` on the web service (Step 3).
 | **Runtime** | Node |
 | **Build Command** | `npm install && npx prisma@5.22.0 generate && npm run build` |
 | **Start Command** | `npx prisma@5.22.0 migrate deploy && npm run start:prod` |
+
+`start:prod` runs `node dist/main.js` (Nest emits `dist/` from `src/`).
 | **Instance type** | Free |
 
 ### Why these commands?
