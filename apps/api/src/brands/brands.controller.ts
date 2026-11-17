@@ -1,10 +1,10 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { BrandsService } from './brands.service';
 import { BrandQueryDto } from './brands.dto';
 import { Public } from '../common/decorators';
 import { CurrentUser } from '../common/current-user.decorator';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 @ApiTags('Brands')
 @Controller('brands')
@@ -25,7 +25,7 @@ export class BrandsController {
     return this.brands.findAll(query);
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: 'Has current user reviewed this brand? (JWT required)' })
   @Get(':slug/context')
   getContext(

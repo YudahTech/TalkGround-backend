@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { GrowthService } from './growth.service';
 import { SurveyResponseDto, WaitlistDto } from './growth.dto';
 import { Public, Roles } from '../common/decorators';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 @ApiTags('Growth')
 @Controller()
@@ -28,7 +28,7 @@ export class GrowthController {
   }
 
   @Roles(UserRole.ADMIN)
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: 'Waitlist stats (admin JWT)' })
   @Get('waitlist/stats')
   waitlistStats() {

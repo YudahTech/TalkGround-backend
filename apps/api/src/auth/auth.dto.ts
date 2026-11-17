@@ -111,18 +111,8 @@ export class ChangePasswordDto {
   newPassword: string;
 }
 
-export class RefreshDto {
-  @ApiPropertyOptional({
-    description:
-      'Refresh token from login/register/refresh. Optional when the HttpOnly talkground_rt cookie is sent.',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  refreshToken?: string;
-}
-
-export class LogoutDto extends RefreshDto {
+/** The refresh token is read from the HttpOnly talkground_rt cookie only — never from the body. */
+export class LogoutDto {
   @ApiPropertyOptional({
     example: false,
     description: 'Also revoke every other device',

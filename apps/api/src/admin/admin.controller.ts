@@ -8,7 +8,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UserRole } from '@prisma/client';
 import { AdminService } from './admin.service';
 import { Roles } from '../common/decorators';
@@ -28,14 +28,14 @@ import {
 } from './admin.dto';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthUser } from '../common/current-user.decorator';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 /**
  * Permissions (PRD §8.1). Class default: MODERATOR or ADMIN.
  * Routes marked @Roles(ADMIN) are admin-only (method metadata overrides the class).
  */
 @ApiTags('Admin (JWT + MODERATOR/ADMIN role)')
-@ApiBearerAuth(SWAGGER_BEARER_AUTH)
+@ApiCookieAuth(SWAGGER_COOKIE_AUTH)
 @Controller()
 @Roles(UserRole.ADMIN, UserRole.MODERATOR)
 export class AdminController {
@@ -203,7 +203,7 @@ export class AdminController {
 }
 
 @ApiTags('Brand suggestions')
-@ApiBearerAuth(SWAGGER_BEARER_AUTH)
+@ApiCookieAuth(SWAGGER_COOKIE_AUTH)
 @Controller('brand-suggestions')
 export class BrandSuggestionsController {
   constructor(private admin: AdminService) {}

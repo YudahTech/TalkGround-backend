@@ -63,19 +63,19 @@ export function checkSecurityConfig() {
 }
 
 /**
- * CSRF defence for cookie-authenticated requests. Bearer-token requests are not affected
- * (browsers never attach an Authorization header cross-site). A state-changing request that
- * carries our auth cookies must come from an allowed Origin (or Referer).
+ * CSRF defence. Auth is cookie-only, so a state-changing request that carries our auth cookies
+ * must come from an allowed Origin (or Referer), or from the API's own origin (Swagger UI at /docs).
  */
 function csrfOriginCheck(origins: string[]) {
   const safe = new Set(['GET', 'HEAD', 'OPTIONS']);
   return (req: Request, res: Response, next: NextFunction) => {
-    if (safe.has(req.method) || req.headers.authorization) return next();
+    if (safe.has(req.method)) return next();
     const cookies = (req.cookies ?? {}) as Record<string, string>;
     if (!cookies[ACCESS_COOKIE] && !cookies[REFRESH_COOKIE]) return next();
 
     const source = req.headers.origin ?? safeOrigin(req.headers.referer);
     if (source && origins.includes(source.replace(/\/$/, ''))) return next();
+    if (source && isSameOrigin(source, req)) return next();
 
     res.status(403).json({
       error: {
@@ -84,6 +84,15 @@ function csrfOriginCheck(origins: string[]) {
       },
     });
   };
+}
+
+/** Same host as the API itself (e.g. Swagger UI served from /docs). */
+function isSameOrigin(source: string, req: Request): boolean {
+  try {
+    return new URL(source).host === req.get('host');
+  } catch {
+    return false;
+  }
 }
 
 function safeOrigin(referer?: string): string | undefined {

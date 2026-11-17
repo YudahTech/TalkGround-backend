@@ -9,7 +9,7 @@ import {
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ReviewsService } from './reviews.service';
 import {
   AddMediaDto,
@@ -20,7 +20,7 @@ import {
 } from '../brands/brands.dto';
 import { CurrentUser } from '../common/current-user.decorator';
 import { OptionalAuth, Public } from '../common/decorators';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 @ApiTags('Reviews')
 @Controller()
@@ -48,7 +48,7 @@ export class ReviewsController {
     );
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'Create review (JWT; verified email + phone required)',
     description:
@@ -65,7 +65,7 @@ export class ReviewsController {
     return this.reviews.create(user, dto, ip);
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: 'Update own review (JWT). Previous version is kept; trust checks re-run.' })
   @ApiBody({ type: UpdateReviewDto })
   @Patch('reviews/:id')
@@ -78,14 +78,14 @@ export class ReviewsController {
     return this.reviews.update(user, id, dto, req.ip || req.socket.remoteAddress);
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: 'Soft-delete own review (JWT)' })
   @Delete('reviews/:id')
   remove(@CurrentUser() user: { id: string }, @Param('id') id: string) {
     return this.reviews.remove(user, id);
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'Attach photo/receipt URL after Cloudinary upload (JWT)',
   })
@@ -99,7 +99,7 @@ export class ReviewsController {
     return this.reviews.addMedia(user, id, dto);
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: 'Report a review (JWT)' })
   @ApiBody({ type: ReportReviewDto })
   @Post('reviews/:id/report')
@@ -111,7 +111,7 @@ export class ReviewsController {
     return this.reviews.report(user, id, dto);
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: 'Toggle helpful vote (JWT)' })
   @Post('reviews/:id/helpful')
   toggleHelpful(@CurrentUser() user: { id: string }, @Param('id') id: string) {

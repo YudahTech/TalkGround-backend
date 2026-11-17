@@ -1,5 +1,5 @@
 import { Body, Controller, HttpCode, Post, Req, Res } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { AuthService } from './auth.service';
@@ -9,7 +9,6 @@ import {
   ForgotPasswordDto,
   LoginDto,
   LogoutDto,
-  RefreshDto,
   RegisterDto,
   ResetPasswordDto,
   SendPhoneOtpDto,
@@ -17,19 +16,23 @@ import {
 import { OptionalAuth, Public } from '../common/decorators';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthUser } from '../common/current-user.decorator';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 import {
   clearSessionCookies,
   readCookie,
   REFRESH_COOKIE,
   setSessionCookies,
+  withoutTokens,
 } from './cookies';
 
 const MINUTE = 60_000;
 
 /**
- * Session responses always include `accessToken` + `refreshToken` in the body (Bearer clients)
- * AND set HttpOnly cookies `talkground_at` / `talkground_rt` (cookie clients). Use one or the other.
+ * Cookie-only sessions. login / register / refresh / change-password set two HttpOnly cookies:
+ *  - talkground_at  (access JWT, path /)
+ *  - talkground_rt  (rotating refresh token, path /api/v1/auth)
+ * Tokens are never returned in the JSON body and Bearer headers are not accepted.
+ * Browsers must call the API with credentials: 'include'.
  */
 @ApiTags('Auth')
 @Controller('auth')
@@ -41,7 +44,7 @@ export class AuthController {
   @ApiOperation({
     summary: 'Register (public). Sends a 6-digit email verification code.',
     description:
-      'Returns { data: { accessToken, refreshToken, expiresIn, refreshTokenExpiresAt, user, message } }. ' +
+      'Sets the HttpOnly session cookies and returns { data: { user, expiresIn, refreshTokenExpiresAt, message } }. ' +
       'With EMAIL_DEV_MODE=true also returns devEmailCode.',
   })
   @ApiBody({ type: RegisterDto })
@@ -52,7 +55,7 @@ export class AuthController {
   ) {
     const data = await this.auth.register(dto);
     setSessionCookies(res, data);
-    return { data };
+    return { data: withoutTokens(data) };
   }
 
   @Public()
@@ -61,6 +64,7 @@ export class AuthController {
     summary:
       'Login (public). 10 failed attempts lock the account for 15 minutes.',
     description:
+      'Sets the HttpOnly session cookies and returns { data: { user, expiresIn, refreshTokenExpiresAt } }. ' +
       'Demo: chinedu.okafor@gmail.com / demo1234 — Admin: admin@revyu.ng / admin123',
   })
   @ApiBody({ type: LoginDto })
@@ -71,32 +75,28 @@ export class AuthController {
   ) {
     const data = await this.auth.login(dto);
     setSessionCookies(res, data);
-    return { data };
+    return { data: withoutTokens(data) };
   }
 
   @Public()
   @HttpCode(200)
   @Throttle({ default: { limit: 30, ttl: MINUTE } })
   @ApiOperation({
-    summary:
-      'Exchange a refresh token for a new access + refresh token (rotation)',
+    summary: 'Rotate the session cookies using the talkground_rt cookie (no body)',
     description:
-      'Send { refreshToken } or rely on the talkground_rt cookie. The old refresh token stops working. ' +
-      'Replaying an already-used refresh token signs the user out everywhere.',
+      'Reads the HttpOnly talkground_rt cookie and sets fresh talkground_at + talkground_rt cookies. ' +
+      'The old refresh token stops working. Replaying an already-used refresh token signs the user out everywhere. ' +
+      'On failure (401) both cookies are cleared.',
   })
-  @ApiBody({ type: RefreshDto })
   @Post('refresh')
   async refresh(
-    @Body() dto: RefreshDto,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
     try {
-      const data = await this.auth.refresh(
-        dto.refreshToken ?? readCookie(req, REFRESH_COOKIE),
-      );
+      const data = await this.auth.refresh(readCookie(req, REFRESH_COOKIE));
       setSessionCookies(res, data);
-      return { data };
+      return { data: withoutTokens(data) };
     } catch (err) {
       clearSessionCookies(res);
       throw err;
@@ -105,7 +105,7 @@ export class AuthController {
 
   @OptionalAuth()
   @HttpCode(200)
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary:
       'Logout: revokes the refresh token and invalidates current access tokens',
@@ -120,7 +120,7 @@ export class AuthController {
     @CurrentUser() user?: AuthUser | null,
   ) {
     const data = await this.auth.logout(
-      dto.refreshToken ?? readCookie(req, REFRESH_COOKIE),
+      readCookie(req, REFRESH_COOKIE),
       user?.id,
       dto.allDevices ?? false,
     );
@@ -153,7 +153,7 @@ export class AuthController {
     return this.auth.resetPassword(dto).then((data) => ({ data }));
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @HttpCode(200)
   @Throttle({ default: { limit: 5, ttl: MINUTE } })
   @ApiOperation({
@@ -169,10 +169,10 @@ export class AuthController {
   ) {
     const data = await this.auth.changePassword(user.id, dto);
     setSessionCookies(res, data);
-    return { data };
+    return { data: withoutTokens(data) };
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @HttpCode(200)
   @Throttle({ default: { limit: 3, ttl: MINUTE } })
   @ApiOperation({
@@ -184,7 +184,7 @@ export class AuthController {
     return this.auth.sendEmailCode(user.id).then((data) => ({ data }));
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @HttpCode(200)
   @Throttle({ default: { limit: 10, ttl: MINUTE } })
   @ApiOperation({ summary: 'Confirm email verification code (JWT)' })
@@ -194,7 +194,7 @@ export class AuthController {
     return this.auth.confirmEmailCode(user.id, dto).then((data) => ({ data }));
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @Throttle({ default: { limit: 3, ttl: MINUTE } })
   @ApiOperation({
     summary:
@@ -210,7 +210,7 @@ export class AuthController {
       .then((data) => ({ data }));
   }
 
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @Throttle({ default: { limit: 10, ttl: MINUTE } })
   @ApiOperation({
     summary: 'Confirm phone OTP (JWT). 5 wrong attempts invalidate the code.',

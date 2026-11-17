@@ -5,6 +5,9 @@
 **Last updated:** 17 November 2026 (API v1.1)  
 **Deploy target:** Render (see [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md))
 
+> **API v1.2 (Nov 2026): auth is HttpOnly-cookie only.** No tokens in responses, no `Authorization`
+> header. Read **[FRONTEND-AUTH.md](./FRONTEND-AUTH.md)** before writing any auth code.
+>
 > **API v1.1 (Nov 2026):** review posting now requires verified email + phone, uploads must post the
 > signed `params`, and refresh tokens rotate. Read **[API-CHANGELOG-v1.1.md](./API-CHANGELOG-v1.1.md)**
 > first — it lists every change and the screens to add.
@@ -18,6 +21,7 @@
 | **API base URL** | `https://revyu-backend.onrender.com/api/v1` |
 | **Swagger UI** | https://revyu-backend.onrender.com/docs |
 | **OpenAPI JSON** | https://revyu-backend.onrender.com/docs/openapi.json |
+| **Auth guide (cookies)** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/FRONTEND-AUTH.md |
 | **This guide (GitHub)** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/FRONTEND-INTEGRATION.md |
 | **API testing guide** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/API-TESTING-GUIDE.md |
 | **Screen → endpoint map** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/DESIGN-BACKEND-MAPPING.md |
@@ -40,7 +44,7 @@ Every write endpoint documents its body in Swagger (Schemas + Try it out):
 | Admin | `CreateBrandDto`, `UpdateBrandDto` (`claimed`), `ModerateReviewDto` |
 | Growth | `WaitlistDto`, `SurveyResponseDto` |
 
-Open **Schemas** at the bottom of `/docs`, or expand an endpoint → **Request body** to see fields, enums, and examples. After login, click **Authorize** and paste `accessToken`.
+Open **Schemas** at the bottom of `/docs`, or expand an endpoint → **Request body** to see fields, enums, and examples. To call protected routes, run `POST /auth/login` on the Swagger page first — the browser keeps the session cookie (no Authorize step).
 
 **Demo accounts (after DB seed):**
 
@@ -59,7 +63,7 @@ Open **Schemas** at the bottom of `/docs`, or expand an endpoint → **Request b
 | **API base (live / Render)** | `https://revyu-backend.onrender.com/api/v1` |
 | **Swagger (live)** | `https://revyu-backend.onrender.com/docs` |
 | **OpenAPI JSON (live)** | `https://revyu-backend.onrender.com/docs/openapi.json` |
-| **Auth header** | `Authorization: Bearer <accessToken>` |
+| **Auth** | HttpOnly cookies — `fetch(..., { credentials: 'include' })`. See [FRONTEND-AUTH.md](./FRONTEND-AUTH.md) |
 | **Content-Type** | `application/json` |
 
 ### Frontend env
@@ -110,7 +114,7 @@ flowchart TD
 
 ### Logged-in user journey
 
-1. `POST /auth/login` or `register` → store `accessToken`.
+1. `POST /auth/login` or `register` → keep `data.user` in state (session lives in HttpOnly cookies).
 2. Brand page → `GET /brands/:slug/context` → **Write** vs **Edit**.
 3. Submit → `POST /reviews` (or `PATCH /reviews/:id`).
 4. Photos (optional) → signature → Cloudinary → `POST /reviews/:id/media`.
@@ -157,7 +161,7 @@ Paginated:
 | Status | Meaning | Frontend action |
 |--------|---------|-----------------|
 | 400 | Bad input | Show `error.message` |
-| 401 | Missing/invalid JWT | Clear token → `/login` |
+| 401 | No/expired session | `POST /auth/refresh` once, retry; still 401 → `/login` |
 | 403 | Wrong role / suspended | Show message |
 | 404 | Not found | Empty state |
 | 409 | Conflict (duplicate) | Show message |
@@ -175,7 +179,7 @@ Paginated:
 | ADMIN | Everything MODERATOR + create/deactivate brands, users, suspend, roles, audit log (incl. **setting `claimed`**) |
 
 **v1.1:** writing a review requires `emailVerified` **and** `phoneVerified` (API returns `403` otherwise).
-Auth works with a Bearer token **or** HttpOnly cookies — see [API-CHANGELOG-v1.1.md](./API-CHANGELOG-v1.1.md).
+Auth is HttpOnly cookies only — see [FRONTEND-AUTH.md](./FRONTEND-AUTH.md).
 
 ---
 
@@ -206,7 +210,7 @@ Base path: `/api/v1` (omit in tables below).
 | `POST` | `/auth/verify-phone/send-otp` | JWT | Future SMS gate | Sends OTP (or logs in `OTP_DEV_MODE`) |
 | `POST` | `/auth/verify-phone/confirm-otp` | JWT | Future SMS gate | Confirms OTP, marks phone verified |
 
-**UI:** Login/Register screens. Store `data.accessToken`. Attach on every protected call.
+**UI:** Login/Register screens. Keep `data.user` in state; send every request with `credentials: 'include'`. Full auth table: [FRONTEND-AUTH.md §3](./FRONTEND-AUTH.md#3-auth-endpoints).
 
 ---
 
@@ -337,7 +341,7 @@ All require JWT + `role: ADMIN`.
 
 ```http
 PATCH /api/v1/admin/brands/{id}
-Authorization: Bearer <adminToken>
+Cookie: talkground_at=…   (sent automatically by the browser after admin login)
 
 { "claimed": true }
 ```
@@ -400,20 +404,12 @@ Authorization: Bearer <adminToken>
 ```typescript
 const API_URL = process.env.NEXT_PUBLIC_API_URL!;
 
-export async function api<T>(
-  path: string,
-  options: RequestInit = {},
-  token?: string | null,
-): Promise<T> {
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    ...(options.headers as Record<string, string>),
-  };
-  if (token) headers.Authorization = `Bearer ${token}`;
-
+// Simplified. Use the version with automatic refresh in FRONTEND-AUTH.md §5.1.
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers,
+    credentials: 'include', // sends the HttpOnly session cookies
+    headers: { 'Content-Type': 'application/json', ...options.headers },
     cache: 'no-store',
   });
   const json = await res.json().catch(() => ({}));
@@ -453,7 +449,7 @@ export async function api<T>(
 | Cloudinary | Optional — text reviews work |
 | Resend email | Forgot-password placeholder |
 | Public “claim business” UI | **Do not build against API yet** |
-| Refresh token rotation | Same token for now |
+| Refresh token rotation | Live — cookie-based, see FRONTEND-AUTH.md |
 
 ---
 
@@ -461,9 +457,8 @@ export async function api<T>(
 
 1. Start API (local or open Render URL).
 2. Open `/docs`.
-3. `POST /auth/login` → copy `data.accessToken`.
-4. **Authorize** → paste token (no `Bearer ` prefix).
-5. Try protected routes.
+3. `POST /auth/login` → Execute (the browser stores the session cookie).
+4. Try protected routes — no Authorize step needed.
 
 ```bash
 npx openapi-typescript https://revyu-backend.onrender.com/docs/openapi.json -o src/lib/api-schema.ts

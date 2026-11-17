@@ -25,9 +25,8 @@ NestJS builds Swagger from your **controllers**. If a route exists in Nest but l
 **Before calling Me routes:**
 
 1. `POST /api/v1/auth/login`
-2. Copy `accessToken`
-3. Click **Authorize** → paste token → Authorize
-4. Then Execute `GET /users/me`
+2. Execute — the browser stores the HttpOnly session cookie
+3. Then Execute `GET /users/me` (no Authorize step; auth is cookie-only)
 
 ---
 
@@ -38,8 +37,8 @@ Whenever you add a route, add these decorators:
 ### 1. Tag the controller or method
 
 ```typescript
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { ApiTags, ApiOperation, ApiCookieAuth } from '@nestjs/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 @ApiTags('My Feature')          // groups endpoints in Swagger UI
 @Controller('my-feature')
@@ -60,13 +59,13 @@ export class MyFeatureController {
 ### 3. If JWT is required
 
 ```typescript
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({ summary: '...' })
   @Get('private')
   privateThing(@CurrentUser() user: { id: string }) { ... }
 ```
 
-`SWAGGER_BEARER_AUTH` must match the name in `main.ts` → `addBearerAuth(..., SWAGGER_BEARER_AUTH)`.
+`SWAGGER_COOKIE_AUTH` must match the name in `main.ts` → `addCookieAuth(..., SWAGGER_COOKIE_AUTH)`.
 
 ### 4. If the route is public
 
@@ -99,8 +98,8 @@ DTOs with `class-validator` (`@IsString()`, etc.) already show up as request bod
 | File | Role |
 |------|------|
 | `src/main.ts` | `DocumentBuilder` + `SwaggerModule.setup('docs', ...)` |
-| `src/common/swagger.ts` | Bearer auth scheme name constant |
-| `*.controller.ts` | `@ApiTags`, `@ApiOperation`, `@ApiBearerAuth` |
+| `src/common/swagger.ts` | Cookie auth scheme name constant |
+| `*.controller.ts` | `@ApiTags`, `@ApiOperation`, `@ApiCookieAuth` |
 
 You do **not** manually list every path in `main.ts`. Controllers are scanned automatically.
 
@@ -133,12 +132,12 @@ Or open `http://localhost:3001/docs/openapi.json` and search for `users/me`.
 
 ```typescript
 import { Controller, Get } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 import { CurrentUser } from '../common/current-user.decorator';
 
 @ApiTags('Example')
-@ApiBearerAuth(SWAGGER_BEARER_AUTH)
+@ApiCookieAuth(SWAGGER_COOKIE_AUTH)
 @Controller('example')
 export class ExampleController {
   @ApiOperation({ summary: 'GET /example — needs JWT' })

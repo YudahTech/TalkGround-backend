@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Param, Patch } from '@nestjs/common';
 import {
-  ApiBearerAuth,
+  ApiCookieAuth,
   ApiBody,
   ApiOperation,
   ApiParam,
@@ -10,7 +10,7 @@ import { UsersService } from './users.service';
 import { Public } from '../common/decorators';
 import { CurrentUser } from '../common/current-user.decorator';
 import { DeleteAccountDto, UpdateProfileDto } from './users.dto';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 /**
  * Paths (all under global prefix /api/v1):
@@ -24,11 +24,11 @@ export class UsersController {
   constructor(private users: UsersService) {}
 
   @ApiTags('Users — Me (JWT)')
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'GET /users/me — Current user profile',
     description:
-      'Requires JWT. Login → Authorize (paste accessToken) → Execute. Returns your profile only.',
+      'Requires the session cookie. Log in via POST /auth/login first, then Execute. Returns your profile only.',
   })
   @Get('me')
   getMe(@CurrentUser() user: { id: string }) {
@@ -36,7 +36,7 @@ export class UsersController {
   }
 
   @ApiTags('Users — Me (JWT)')
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'PATCH /users/me — Update my profile',
     description: 'Requires JWT. Partial update: displayName, bio, avatarUrl, city, interests.',
@@ -48,7 +48,7 @@ export class UsersController {
   }
 
   @ApiTags('Users — Me (JWT)')
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'GET /users/me/dashboard — My dashboard stats',
     description:
@@ -60,7 +60,7 @@ export class UsersController {
   }
 
   @ApiTags('Users — Me (JWT)')
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'GET /users/me/reviews — All my reviews',
     description: 'Requires JWT. Lists every review you wrote (except removed).',
@@ -71,7 +71,7 @@ export class UsersController {
   }
 
   @ApiTags('Users — Me (JWT)')
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'GET /users/me/export — Download all my data (NDPA)',
   })
@@ -81,7 +81,7 @@ export class UsersController {
   }
 
   @ApiTags('Users — Me (JWT)')
-  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
     summary: 'DELETE /users/me — Delete my account (NDPA)',
     description:

@@ -41,7 +41,7 @@ OTP_DEV_MODE=true
 2. Expand tag **Users — Me (JWT)** for `/users/me`, `/users/me/dashboard`, `/users/me/reviews`
 3. Expand other tags (Auth, Brands, Reviews, Admin…)
 4. **Try it out** → Execute
-5. For protected routes: login first → **Authorize** → paste `accessToken`
+5. For protected routes: run `POST /auth/login` first — the browser keeps the HttpOnly session cookie (no Authorize step). With curl, use a cookie jar (`-c jar.txt` / `-b jar.txt`) — see [FRONTEND-AUTH.md §8](./FRONTEND-AUTH.md#8-testing-from-the-command-line-curl)
 
 See also: [SWAGGER-GUIDE.md](./SWAGGER-GUIDE.md)
 
@@ -73,7 +73,7 @@ Sample brand slug: `nexxas-kitchen`
 }
 ```
 
-**Expect:** `200` + `data.accessToken`, `data.user`, `data.message`  
+**Expect:** `201` + `data.user`, `data.message`, `Set-Cookie: talkground_at`, `talkground_rt` (no tokens in the body)  
 **Errors:** `409` if email/username taken, `400` if validation fails
 
 ---
@@ -88,8 +88,8 @@ Sample brand slug: `nexxas-kitchen`
 }
 ```
 
-**Expect:** `200` + `data.accessToken`, `data.user` with `id`, `role`, `phoneVerified`  
-**Save** `accessToken` for later tests.
+**Expect:** `201` + `data.user` with `id`, `role`, `phoneVerified`, and the two HttpOnly `Set-Cookie` headers  
+Later tests reuse the cookie (browser/Swagger automatically, curl via `-b jar.txt`).
 
 ---
 
@@ -103,7 +103,7 @@ Sample brand slug: `nexxas-kitchen`
 
 ### POST `/auth/verify-phone/send-otp` — JWT
 
-**Headers:** `Authorization: Bearer <token>`
+**Auth:** session cookie from login
 
 **Expect:** `200` + `{ data: { message: "OTP sent" } }`  
 **Dev:** Check API terminal for `[DEV OTP] phone=... code=......`

@@ -1,5 +1,10 @@
 # TalkGround API v1.1 — Security & trust release (frontend migration guide)
 
+> **Superseded for auth by v1.2:** Bearer tokens were removed. Auth is HttpOnly-cookie only and
+> responses no longer contain `accessToken` / `refreshToken`. Sections 2.1–2.3 below describe the old
+> dual mode — follow **[FRONTEND-AUTH.md](./FRONTEND-AUTH.md)** instead. Verification and upload
+> changes in this document still apply.
+
 **Released:** 17 November 2026 · **Base URL unchanged:** `https://revyu-backend.onrender.com/api/v1`
 **Swagger:** https://revyu-backend.onrender.com/docs (version 1.1)
 

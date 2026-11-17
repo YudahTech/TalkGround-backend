@@ -1,11 +1,11 @@
 import { Body, Controller, Post } from '@nestjs/common';
-import { ApiBearerAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { UploadsService } from './uploads.service';
 import { UploadSignatureDto } from './uploads.dto';
-import { SWAGGER_BEARER_AUTH } from '../common/swagger';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 
 @ApiTags('Uploads')
-@ApiBearerAuth(SWAGGER_BEARER_AUTH)
+@ApiCookieAuth(SWAGGER_COOKIE_AUTH)
 @Controller('uploads')
 export class UploadsController {
   constructor(private uploads: UploadsService) {}

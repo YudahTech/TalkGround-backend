@@ -1,16 +1,17 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
-import { ExtractJwt, Strategy } from 'passport-jwt';
+import { Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { PrismaService } from '../prisma/prisma.service';
 import { ACCESS_COOKIE, readCookie } from './cookies';
 
-/** Bearer header first (existing clients), then the HttpOnly access cookie. */
-export const extractAccessToken = ExtractJwt.fromExtractors([
-  ExtractJwt.fromAuthHeaderAsBearerToken(),
-  (req: Request) => readCookie(req, ACCESS_COOKIE) ?? null,
-]);
+/**
+ * Cookie-only auth: the access JWT is read from the HttpOnly `talkground_at` cookie.
+ * `Authorization: Bearer` headers are deliberately ignored.
+ */
+export const extractAccessToken = (req: Request): string | null =>
+  readCookie(req, ACCESS_COOKIE) ?? null;
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
