@@ -75,7 +75,7 @@ We do not remove negative reviews simply because a business dislikes them. We re
 
 ## Appeals
 
-If your review was removed and you believe this was an error, contact: moderation@revyu.ng
+If your review was removed and you believe this was an error, contact: moderation@talkground.ng
 
 Include your username, the business name, and why you believe the review was compliant.
 

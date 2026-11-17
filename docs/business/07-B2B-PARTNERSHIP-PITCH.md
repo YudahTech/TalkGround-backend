@@ -17,7 +17,7 @@ TalkGround is Nigeria's trusted review platform for **restaurants and hotels** â
 
 We help consumers find great places. We help businesses like yours **get discovered by people who are actively looking.**
 
-**Website:** revyu.ng (launching 1 August 2026)
+**Website:** talkground.ng (launching 1 August 2026)
 
 ---
 

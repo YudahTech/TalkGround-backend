@@ -7,7 +7,7 @@
 **Product:** TalkGround — Nigeria's trusted review platform  
 **Founders:** [FOUNDER 1 NAME], [FOUNDER 2 NAME]  
 **Contact:** [EMAIL] | [PHONE]  
-**Website:** revyu.ng (pre-launch)
+**Website:** talkground.ng (pre-launch)
 
 ---
 
@@ -118,6 +118,6 @@ TalkGround is a review platform built for one job: help people **find, read, and
 
 ---
 
-**Next step:** [FOUNDER NAME] — [EMAIL] — revyu.ng/waitlist
+**Next step:** [FOUNDER NAME] — [EMAIL] — talkground.ng/waitlist
 
 *This document is confidential and intended for qualified recipients only.*

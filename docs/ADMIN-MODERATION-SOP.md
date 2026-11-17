@@ -190,7 +190,7 @@ Record: `{ suspended: true, reason: "..." }` in admin panel.
 
 ### Contact email (configure before launch)
 
-`moderation@revyu.ng` or founder email
+`moderation@talkground.ng` or founder email
 
 ---
 

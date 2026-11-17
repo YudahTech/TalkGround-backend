@@ -12,8 +12,8 @@
 
 | Item | Example |
 |------|---------|
-| API base | `https://revyu-backend-production-xxxx.up.railway.app/api/v1` |
-| Swagger | `https://revyu-backend-production-xxxx.up.railway.app/docs` |
+| API base | `https://talkground-backend-production-xxxx.up.railway.app/api/v1` |
+| Swagger | `https://talkground-backend-production-xxxx.up.railway.app/docs` |
 | OpenAPI JSON | `https://...up.railway.app/docs/openapi.json` |
 
 GitHub docs (already public):
@@ -101,7 +101,7 @@ Open API service → **Variables** → add these.
 | `DATABASE_URL` | From Railway Postgres (reference) | **Do not** use local `localhost:5433` |
 | `JWT_SECRET` | Long random string (see below) | **Never** use `change-me-in-production...` |
 | `JWT_EXPIRES_IN` | `7d` | Same as local |
-| `CORS_ORIGIN` | Frontend URL | e.g. `http://localhost:3000` now, later `https://revyu.vercel.app` |
+| `CORS_ORIGIN` | Frontend URL | e.g. `http://localhost:3000` now, later `https://talkground.vercel.app` |
 | `OTP_DEV_MODE` | `true` | Keep `true` until Termii is ready |
 
 **Generate a strong JWT secret (run locally):**
@@ -150,7 +150,7 @@ Plus `DATABASE_URL` from the Postgres plugin.
 ## Step 5 — Generate a public domain
 
 1. API service → **Settings** → **Networking** → **Generate Domain**
-2. Copy the URL, e.g. `https://revyu-backend-production-xxxx.up.railway.app`
+2. Copy the URL, e.g. `https://talkground-backend-production-xxxx.up.railway.app`
 3. Your public paths:
 
 ```text

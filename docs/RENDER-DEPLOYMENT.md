@@ -67,8 +67,8 @@ For long-term demos, prefer **A** or **B**. Jump to [Neon + Render (recommended)
 ### Option C — Render PostgreSQL (optional)
 
 1. Dashboard → **New +** → **PostgreSQL**
-2. Name: `revyu-db`
-3. Database: `revyu` (or leave default)
+2. Name: `talkground-db`
+3. Database: `talkground` (or leave default)
 4. Region: closest to you (e.g. Frankfurt / Oregon)
 5. Plan: **Free** (or paid if you need persistence)
 6. Create → wait until **Available**
@@ -91,7 +91,7 @@ Paste that as `DATABASE_URL` on the web service (Step 3).
 
 | Setting | Value |
 |---------|--------|
-| **Name** | `revyu-backend` (live service name) |
+| **Name** | `talkground-backend` (the URL stays `revyu-backend.onrender.com`) |
 | **Region** | Same as Postgres |
 | **Root Directory** | `apps/api` |
 | **Runtime** | Node |
@@ -130,7 +130,7 @@ Web Service → **Environment** → add:
 | `DATABASE_URL` | Neon / Supabase URI **or** Render Internal URL | Prefer Neon for demos; must be reachable from Render (SSL usually required) |
 | `JWT_SECRET` | Long random string | Generate below — never commit |
 | `JWT_EXPIRES_IN` | `7d` | Same as local |
-| `CORS_ORIGIN` | Your frontend origin | e.g. `http://localhost:3000` or `https://revyu.vercel.app` |
+| `CORS_ORIGIN` | Your frontend origin | e.g. `http://localhost:3000` or `https://talkground.vercel.app` |
 | `OTP_DEV_MODE` | `true` | Until Termii is live — OTP prints in logs |
 
 ### Generate JWT_SECRET (PowerShell)
@@ -283,7 +283,7 @@ Render API  ──┘
 
 1. Open [https://console.neon.tech](https://console.neon.tech) → sign up with GitHub.
 2. **Create project**
-   - Name: `revyu`
+   - Name: `talkground`
    - Region: closest to your Render region (e.g. both EU or both US)
    - Postgres version: default is fine
 3. After create, open **Dashboard** → **Connection details**.
@@ -299,7 +299,7 @@ postgresql://neondb_owner:PASSWORD@ep-xxxx.region.aws.neon.tech/neondb?sslmode=r
 
 ### Env checklist (Render Web Service → Environment)
 
-Set these on `revyu-backend` (create the Web Service first if you have not — Steps 2–3 above). **Do not create a Render Postgres** if you use Neon.
+Set these on `talkground-backend` (create the Web Service first if you have not — Steps 2–3 above). **Do not create a Render Postgres** if you use Neon.
 
 | Variable | Required | Example / source |
 |----------|----------|------------------|

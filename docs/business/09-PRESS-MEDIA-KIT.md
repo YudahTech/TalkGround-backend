@@ -13,7 +13,7 @@
 | **Title** | Co-founder, TalkGround |
 | **Email** | [PRESS EMAIL] |
 | **Phone** | [PHONE] |
-| **Website** | revyu.ng |
+| **Website** | talkground.ng |
 
 ---
 
@@ -31,7 +31,7 @@ TalkGround's trust model includes receipt-verified reviews (where reviewers uplo
 
 The platform launches in Lagos and Abuja on 1 August 2026, focusing initially on restaurants and hotels before expanding to additional categories and cities.
 
-**Website:** revyu.ng | **Waitlist:** revyu.ng/waitlist
+**Website:** talkground.ng | **Waitlist:** talkground.ng/waitlist
 
 ---
 
@@ -149,7 +149,7 @@ The platform launches in Lagos and Abuja on 1 August 2026, focusing initially on
 | Twitter/X | @[HANDLE] | |
 | Instagram | @[HANDLE] | |
 | LinkedIn | [COMPANY PAGE] | |
-| Website | revyu.ng | |
+| Website | talkground.ng | |
 
 ---
 

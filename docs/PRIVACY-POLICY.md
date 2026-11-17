@@ -2,7 +2,7 @@
 
 **Effective date:** [DATE — set before public launch]  
 **Entity:** [COMPANY NAME LTD]  
-**Contact:** privacy@revyu.ng
+**Contact:** privacy@talkground.ng
 
 Compliant with the **Nigeria Data Protection Regulation (NDPR)**.
 
@@ -115,7 +115,7 @@ You have the right to:
 - **Object** to processing based on legitimate interest
 - **Lodge a complaint** with the Nigeria Data Protection Commission (NDPC)
 
-To exercise rights: privacy@revyu.ng — we respond within 30 days.
+To exercise rights: privacy@talkground.ng — we respond within 30 days.
 
 ---
 
@@ -150,7 +150,7 @@ We will notify users of material changes via email or Platform notice.
 ## 13. Contact
 
 **Data Protection Officer:** [NAME]  
-**Email:** privacy@revyu.ng
+**Email:** privacy@talkground.ng
 
 ---
 

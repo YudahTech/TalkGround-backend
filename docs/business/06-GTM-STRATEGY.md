@@ -18,13 +18,13 @@ TalkGround wins through **city density**, not nationwide awareness.
 ### Survey campaign
 - **Goal:** 300+ responses proving problem exists
 - **Channels:** Twitter/X, Instagram, WhatsApp groups, NYSC groups, founder networks
-- **Asset:** revyu.ng/survey
+- **Asset:** talkground.ng/survey
 - **Output:** Pitch deck metrics + Survey Results Report
 
 ### Waitlist campaign
 - **Goal:** 500+ launch-ready users
 - **Channels:** Same as survey + link in survey completion screen
-- **Asset:** revyu.ng/waitlist
+- **Asset:** talkground.ng/waitlist
 - **Segment by:** City (Lagos/Abuja), primary use (eat out / hotels / write reviews)
 
 ### Success criteria

@@ -13,7 +13,7 @@
 | Database | **Railway PostgreSQL** or **Neon** | Managed, backups |
 | Images | **Cloudinary** | Already integrated |
 | SMS | **Termii** | Nigeria-first |
-| Domain | **Namecheap** / **GoDaddy** | `revyu.ng` or similar |
+| Domain | **Namecheap** / **GoDaddy** | `talkground.ng` or similar |
 
 ---
 
@@ -67,7 +67,7 @@ DATABASE_URL=postgresql://...
 JWT_SECRET=<long-random-string>
 JWT_EXPIRES_IN=7d
 PORT=3001
-CORS_ORIGIN=https://revyu.ng
+CORS_ORIGIN=https://talkground.ng
 OTP_DEV_MODE=false
 TERMII_API_KEY=...
 TERMII_SENDER_ID=TalkGround
@@ -76,7 +76,7 @@ CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...
 ```
 
-6. Note the deployed URL: `https://revyu-api.up.railway.app`
+6. Note the deployed URL: `https://talkground-api.up.railway.app`
 
 ---
 
@@ -88,11 +88,11 @@ CLOUDINARY_API_SECRET=...
 4. Environment variable:
 
 ```
-NEXT_PUBLIC_API_URL=https://revyu-api.up.railway.app/api/v1
+NEXT_PUBLIC_API_URL=https://talkground-api.up.railway.app/api/v1
 ```
 
 5. Deploy
-6. Add custom domain: `revyu.ng`
+6. Add custom domain: `talkground.ng`
 
 ---
 

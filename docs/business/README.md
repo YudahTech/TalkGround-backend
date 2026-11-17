@@ -28,7 +28,7 @@ Developer docs live in `docs/` (PRD, API spec, architecture, etc.).
 ## Generate PDFs
 
 ```bash
-cd c:\Users\USER\Desktop\revyu
+cd c:\Users\USER\Desktop\TalkGround-backend
 npm run docs:pdf
 ```
 

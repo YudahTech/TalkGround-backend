@@ -41,7 +41,7 @@ Test-Endpoint "GET /brands/filters" "GET" "/brands/filters"
 
 $suffix = Get-Random
 $reg = Test-Endpoint "POST /auth/register" "POST" "/auth/register" @{
-  email = "smoke.$suffix@revyu.ng"
+  email = "smoke.$suffix@talkground.ng"
   password = "testpass123"
   displayName = "Smoke Tester"
   username = "smoke$suffix"

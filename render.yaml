@@ -4,7 +4,7 @@
 
 services:
   - type: web
-    name: revyu-api
+    name: talkground-api
     runtime: node
     plan: free
     rootDir: apps/api
@@ -30,6 +30,12 @@ services:
       - key: FRONTEND_URL
         sync: false
       - key: TERMII_API_KEY
+        sync: false
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
         sync: false
       - key: DATABASE_URL
         sync: false

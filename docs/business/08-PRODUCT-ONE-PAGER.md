@@ -64,8 +64,8 @@ We're launching in **Lagos and Abuja** on **1 August 2026** with restaurants and
 
 | Action | Link |
 |---|---|
-| **Join the waitlist** | revyu.ng/waitlist |
-| **Take our 2-minute survey** | revyu.ng/survey |
+| **Join the waitlist** | talkground.ng/waitlist |
+| **Take our 2-minute survey** | talkground.ng/survey |
 | **Suggest a missing restaurant** | Available after launch |
 
 ---
@@ -86,7 +86,7 @@ Early partners get free premium features when subscriptions launch.
 |---|---|
 | Twitter/X | @[HANDLE] |
 | Instagram | @[HANDLE] |
-| Website | revyu.ng |
+| Website | talkground.ng |
 
 ---
 

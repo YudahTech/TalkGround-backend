@@ -133,7 +133,7 @@
 | P2 | Single bad review dispute | Follow moderation SOP; don't auto-remove |
 | P3 | UI bug | Log issue; fix in next deploy |
 
-**Contact:** `moderation@revyu.ng` (configure before launch)
+**Contact:** `moderation@talkground.ng` (configure before launch)
 
 ---
 

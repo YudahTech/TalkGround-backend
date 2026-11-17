@@ -1,7 +1,7 @@
 # TalkGround — Getting Started (Developer Guide)
 
 **Audience:** Developers joining the TalkGround project  
-**Project path:** `c:\Users\USER\Desktop\revyu`
+**Project path:** `c:\Users\USER\Desktop\TalkGround-backend`
 
 ---
 
@@ -100,14 +100,14 @@ See [ENVIRONMENT-SETUP.md](./ENVIRONMENT-SETUP.md). Minimum:
 ### Step 2 — Start PostgreSQL
 
 ```bash
-cd c:\Users\USER\Desktop\revyu
+cd c:\Users\USER\Desktop\TalkGround-backend
 docker compose up -d
 ```
 
 ### Step 3 — Install dependencies
 
 ```bash
-cd c:\Users\USER\Desktop\revyu
+cd c:\Users\USER\Desktop\TalkGround-backend
 npm install
 cd apps/api && npm install
 cd ../web && npm install

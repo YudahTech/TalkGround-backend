@@ -79,6 +79,6 @@ Google Maps (shallow) · Nigerian review sites (no verification) · Social media
 
 ---
 
-**revyu.ng/waitlist** | **[EMAIL]**
+**talkground.ng/waitlist** | **[EMAIL]**
 
 *Fill bracketed placeholders before distribution.*

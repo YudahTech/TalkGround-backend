@@ -2,7 +2,7 @@
 
 **Effective date:** [DATE — set before public launch]  
 **Entity:** [COMPANY NAME LTD — CAC registered entity]  
-**Contact:** legal@revyu.ng
+**Contact:** legal@talkground.ng
 
 ---
 
@@ -97,7 +97,7 @@ These Terms are governed by the laws of the Federal Republic of Nigeria. Dispute
 
 ## 13. Contact
 
-Questions: legal@revyu.ng
+Questions: legal@talkground.ng
 
 ---
 

@@ -23,7 +23,7 @@ The opportunity is not "create another review app." It is to become the **defaul
 | No verification signal | Cannot tell if reviewer actually visited |
 | Fragmented information | No single searchable source for Lagos/Abuja |
 
-### Survey instrument (live at revyu.ng/survey)
+### Survey instrument (live at talkground.ng/survey)
 
 Key questions designed to quantify:
 - Problem severity (Q2: difficulty finding trustworthy info)

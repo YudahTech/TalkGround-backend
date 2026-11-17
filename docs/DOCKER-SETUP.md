@@ -11,7 +11,7 @@ TalkGround uses Docker **only for PostgreSQL** in local development. The API and
 ## Quick start
 
 ```bash
-cd c:\Users\USER\Desktop\revyu
+cd c:\Users\USER\Desktop\TalkGround-backend
 docker compose up -d
 ```
 
@@ -21,7 +21,7 @@ This starts PostgreSQL 16 on port `5432` with:
 |---|---|
 | User | `postgres` |
 | Password | `password` |
-| Database | `revyu` |
+| Database | `talkground` |
 | Port | `5432` |
 
 Matches default `DATABASE_URL` in `apps/api/.env.example`.
@@ -68,7 +68,7 @@ npm run prisma:seed
 |---|---|
 | Host | `localhost` |
 | Port | `5432` |
-| Database | `revyu` |
+| Database | `talkground` |
 | User | `postgres` |
 | Password | `password` |
 
@@ -91,12 +91,12 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: revyu
+      POSTGRES_DB: talkground
     volumes:
-      - revyu_pg_data:/var/lib/postgresql/data
+      - talkground_pg_data:/var/lib/postgresql/data
 ```
 
-Data persists in Docker volume `revyu_pg_data` across restarts.
+Data persists in Docker volume `talkground_pg_data` across restarts.
 
 ---
 

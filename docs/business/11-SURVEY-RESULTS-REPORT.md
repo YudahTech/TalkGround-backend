@@ -236,7 +236,7 @@ TalkGround surveyed **[X] respondents** across Lagos and Abuja to validate deman
 
 - Full survey instrument: `docs/SURVEY-INSTRUMENT.md`
 - Raw data export: [ADD LINK TO CSV/SPREADSHEET]
-- Survey live at: revyu.ng/survey
+- Survey live at: talkground.ng/survey
 
 ---
 

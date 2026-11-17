@@ -25,7 +25,7 @@
 ## Project location
 
 ```
-c:\Users\USER\Desktop\revyu
+c:\Users\USER\Desktop\TalkGround-backend
 ```
 
 **Not** inside `bango-market-day-frontend`.
@@ -58,7 +58,7 @@ copy apps\api\.env.example apps\api\.env
 
 **Default DATABASE_URL (matches Docker Compose):**
 ```
-postgresql://postgres:password@localhost:5432/revyu?schema=public
+postgresql://postgres:password@localhost:5432/talkground?schema=public
 ```
 
 ### Web — `apps/web/.env.local`
@@ -92,14 +92,14 @@ copy apps\web\.env.example apps\web\.env.local
 
 **Option A — Docker (recommended):**
 ```bash
-cd c:\Users\USER\Desktop\revyu
+cd c:\Users\USER\Desktop\TalkGround-backend
 docker compose up -d
 ```
 See [DOCKER-SETUP.md](./DOCKER-SETUP.md).
 
 **Option B — Local PostgreSQL install:**
 - Install PostgreSQL 15+
-- Create database: `CREATE DATABASE revyu;`
+- Create database: `CREATE DATABASE talkground;`
 - Update `DATABASE_URL` in `.env`
 
 **Option C — Cloud (Railway, Supabase, Neon):**

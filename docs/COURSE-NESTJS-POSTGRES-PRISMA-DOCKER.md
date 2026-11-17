@@ -1,6 +1,6 @@
 # Refresher Course: NestJS, PostgreSQL, Prisma & Docker
 
-**Built for the TalkGround project** — every concept maps to real code in `c:\Users\USER\Desktop\revyu`
+**Built for the TalkGround project** — every concept maps to real code in `c:\Users\USER\Desktop\TalkGround-backend`
 
 **Estimated time:** 12–16 hours (self-paced)  
 **Level:** Intermediate refresh (you've touched these before; this reconnects theory to practice)
@@ -59,9 +59,9 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: password
-      POSTGRES_DB: revyu
+      POSTGRES_DB: talkground
     volumes:
-      - revyu_pg_data:/var/lib/postgresql/data   # Persist data
+      - talkground_pg_data:/var/lib/postgresql/data   # Persist data
 ```
 
 **Key insight:** When you `docker compose down` without `-v`, your database data survives. When you `down -v`, everything is wiped.
@@ -110,7 +110,7 @@ A **relational database** — data lives in tables with rows and columns, connec
 
 ```sql
 -- Create database (once)
-CREATE DATABASE revyu;
+CREATE DATABASE talkground;
 
 -- Basic queries
 SELECT * FROM "User" WHERE email = 'admin@revyu.ng';

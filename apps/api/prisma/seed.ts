@@ -27,7 +27,7 @@ async function main() {
       email: 'admin@revyu.ng',
       passwordHash,
       displayName: 'TalkGround Admin',
-      username: 'revyu_admin',
+      username: 'talkground_admin',
       phone: '+2348000000000',
       emailVerified: true,
       phoneVerified: true,

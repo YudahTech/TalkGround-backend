@@ -102,7 +102,7 @@ src/
 | Aspect | Implementation |
 |---|---|
 | Token type | JWT (access token) |
-| Storage (web) | `localStorage` (`revyu_token`, `revyu_user`) |
+| Storage (web) | `localStorage` (`talkground_token`, `talkground_user`) |
 | Header | `Authorization: Bearer <token>` |
 | Guards | `JwtAuthGuard` (global) + `RolesGuard` for admin |
 | Public routes | `@Public()` decorator skips JWT |

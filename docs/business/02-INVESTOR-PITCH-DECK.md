@@ -86,9 +86,9 @@ A review platform built for trust, not volume.
 4. Write review flow with photo upload
 
 **Live URLs (when deployed):**
-- revyu.ng
-- revyu.ng/survey
-- revyu.ng/waitlist
+- talkground.ng
+- talkground.ng/survey
+- talkground.ng/waitlist
 
 ---
 
@@ -208,6 +208,6 @@ A review platform built for trust, not volume.
 **TalkGround**  
 [FOUNDER NAME]  
 [EMAIL] | [PHONE]  
-revyu.ng/waitlist
+talkground.ng/waitlist
 
 *Confidential. Not for distribution.*

@@ -1,7 +1,7 @@
 # TalkGround — Documentation Index
 
 **Project:** TalkGround  
-**Location:** `c:\Users\USER\Desktop\revyu`  
+**Location:** `c:\Users\USER\Desktop\TalkGround-backend`  
 **Last updated:** July 2026
 
 ---
@@ -18,6 +18,8 @@
 | **Testing all API endpoints** | [API-TESTING-GUIDE.md](./API-TESTING-GUIDE.md) |
 | **Adding/finding Swagger endpoints** | [SWAGGER-GUIDE.md](./SWAGGER-GUIDE.md) |
 | **Deploy API to Render (live Swagger)** | [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md) |
+| **Cloudinary (uploads) setup** | [CLOUDINARY-SETUP.md](./CLOUDINARY-SETUP.md) |
+| **API v1.1 changes for the frontend** | [API-CHANGELOG-v1.1.md](./API-CHANGELOG-v1.1.md) |
 | Deploy API to Railway (legacy) | [RAILWAY-DEPLOYMENT.md](./RAILWAY-DEPLOYMENT.md) |
 | System design + security + claimed | [SYSTEM-DESIGN-SECURITY.md](./SYSTEM-DESIGN-SECURITY.md) |
 | UI screen → endpoint mapping | [DESIGN-BACKEND-MAPPING.md](./DESIGN-BACKEND-MAPPING.md) |

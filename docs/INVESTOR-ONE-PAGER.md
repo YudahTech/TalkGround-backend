@@ -107,8 +107,8 @@ MVP is free for users and brands. Revenue activates once density proves value.
 
 *[Founder name, email, website]*
 
-**Survey live:** revyu.ng/survey  
-**Waitlist:** revyu.ng/waitlist
+**Survey live:** talkground.ng/survey  
+**Waitlist:** talkground.ng/waitlist
 
 ---
 
