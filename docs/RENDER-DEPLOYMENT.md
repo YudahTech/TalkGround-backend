@@ -1,7 +1,7 @@
-# Revyu — Render deployment (API + Postgres)
+# TalkGround — Render deployment (API + Postgres)
 
 **Use this when Railway trial has expired.**  
-**Repo:** https://github.com/YudahTech/Revyu-backend  
+**Repo:** https://github.com/YudahTech/TalkGround-backend  
 **Goal:** Live NestJS API + Swagger URL for the frontend team.
 
 ---
@@ -27,7 +27,7 @@ NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
 **Recommended for demos:** Nest on Render + Postgres on Neon (or Supabase).
 
 ```
-GitHub (YudahTech/Revyu-backend)
+GitHub (YudahTech/TalkGround-backend)
         │
         ▼
 ┌───────────────────┐     DATABASE_URL (SSL)    ┌─────────────────┐
@@ -48,7 +48,7 @@ Prisma only needs a valid `DATABASE_URL` — it does not care whether Postgres i
 
 ## Prerequisites
 
-1. GitHub repo `Revyu-backend` pushed and up to date
+1. GitHub repo `TalkGround-backend` pushed and up to date
 2. Render account: https://dashboard.render.com → Sign up with GitHub
 3. Local API still works (optional, for comparison)
 
@@ -86,7 +86,7 @@ Paste that as `DATABASE_URL` on the web service (Step 3).
 ## Step 2 — Create Web Service (Nest API)
 
 1. **New +** → **Web Service**
-2. Connect GitHub → select **YudahTech/Revyu-backend**
+2. Connect GitHub → select **YudahTech/TalkGround-backend**
 3. Configure:
 
 | Setting | Value |
@@ -144,7 +144,7 @@ node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
 | Variable | When |
 |----------|------|
 | `TERMII_API_KEY` | Real SMS OTP |
-| `TERMII_SENDER_ID` | e.g. `Revyu` |
+| `TERMII_SENDER_ID` | e.g. `TalkGround` |
 | `CLOUDINARY_CLOUD_NAME` | Photo uploads |
 | `CLOUDINARY_API_KEY` | Photo uploads |
 | `CLOUDINARY_API_SECRET` | Photo uploads |

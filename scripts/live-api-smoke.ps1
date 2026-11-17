@@ -1,4 +1,4 @@
-# Live API smoke tests (PowerShell) — Revyu Render
+# Live API smoke tests (PowerShell) — TalkGround Render
 $ErrorActionPreference = "Continue"
 $Base = "https://revyu-backend.onrender.com/api/v1"
 $results = @()

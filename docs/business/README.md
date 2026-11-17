@@ -1,4 +1,4 @@
-# Revyu — Business & Pitch Documents
+# TalkGround — Business & Pitch Documents
 
 **These are NOT developer documents.** Use these for investors, partners, press, and GTM.
 

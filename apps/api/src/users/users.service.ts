@@ -40,7 +40,7 @@ export class UsersService {
       this.prisma.user.update({
         where: { id: userId },
         data: {
-          email: `deleted-${tag}@deleted.revyu.invalid`,
+          email: `deleted-${tag}@deleted.talkground.invalid`,
           username: `deleted_${tag}`,
           displayName: 'Deleted user',
           passwordHash: await bcrypt.hash(randomToken(), 4),
@@ -64,7 +64,7 @@ export class UsersService {
     return { data: { message: 'Your account and personal data have been deleted.' } };
   }
 
-  /** NDPA right of access / portability: everything Revyu stores about the user, as JSON. */
+  /** NDPA right of access / portability: everything TalkGround stores about the user, as JSON. */
   async exportMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

@@ -1,4 +1,4 @@
-# Revyu — System Architecture
+# TalkGround — System Architecture
 
 **Version:** 1.0  
 **Stack:** Next.js + NestJS + PostgreSQL + Prisma + Cloudinary

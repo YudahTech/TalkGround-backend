@@ -333,9 +333,9 @@ export class ReportReviewDto {
 
 export class AddMediaDto {
   @ApiProperty({
-    example: 'https://res.cloudinary.com/<cloud>/image/upload/v1/revyu/reviews/abc.jpg',
+    example: 'https://res.cloudinary.com/<cloud>/image/upload/v1/talkground/reviews/abc.jpg',
     description:
-      'secure_url returned by Cloudinary. Must be in this account under revyu/reviews (photo) or revyu/receipts with type=authenticated (receipt).',
+      'secure_url returned by Cloudinary. Must be in this account under talkground/reviews (photo) or talkground/receipts with type=authenticated (receipt).',
   })
   @IsString()
   @MaxLength(500)

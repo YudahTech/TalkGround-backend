@@ -20,20 +20,20 @@ async function main() {
     where: { email: 'admin@revyu.ng' },
     update: {
       city: City.LAGOS,
-      bio: 'Revyu platform administrator.',
+      bio: 'TalkGround platform administrator.',
       interests: [...DEFAULT_INTERESTS],
     },
     create: {
       email: 'admin@revyu.ng',
       passwordHash,
-      displayName: 'Revyu Admin',
+      displayName: 'TalkGround Admin',
       username: 'revyu_admin',
       phone: '+2348000000000',
       emailVerified: true,
       phoneVerified: true,
       role: UserRole.ADMIN,
       city: City.LAGOS,
-      bio: 'Revyu platform administrator.',
+      bio: 'TalkGround platform administrator.',
       interests: [...DEFAULT_INTERESTS],
     },
   });

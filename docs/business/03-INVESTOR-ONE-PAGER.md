@@ -1,4 +1,4 @@
-# Revyu — Investor One-Pager
+# TalkGround — Investor One-Pager
 
 **Confidential — June 2026**
 
@@ -8,7 +8,7 @@
 
 | | |
 |---|---|
-| **Name** | Revyu |
+| **Name** | TalkGround |
 | **Entity** | [COMPANY NAME LTD] |
 | **Stage** | Pre-seed / Pre-launch |
 | **Launch** | 1 August 2026 |
@@ -25,7 +25,7 @@ Nigerians lack a **trusted, locally dense** platform for restaurant and hotel re
 
 ## Solution
 
-Revyu: **Search → Read trusted reviews → Write your own.**
+TalkGround: **Search → Read trusted reviews → Write your own.**
 
 Built-in trust: receipt-verified badges, phone verification, anti-spam flagging, human moderation.
 
@@ -62,7 +62,7 @@ Comparable: Trustpilot / Yelp monetisation path.
 
 Google Maps (shallow) · Nigerian review sites (no verification) · Social media (unstructured)
 
-**Revyu edge:** Receipt verification + city density + moderation from day one.
+**TalkGround edge:** Receipt verification + city density + moderation from day one.
 
 ---
 

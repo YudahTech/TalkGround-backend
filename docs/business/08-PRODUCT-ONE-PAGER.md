@@ -1,11 +1,11 @@
-# Revyu — Product One-Pager
+# TalkGround — Product One-Pager
 
 **For general audience, social media, and word-of-mouth**  
 **June 2026**
 
 ---
 
-## Revyu
+## TalkGround
 
 ### Trusted reviews for where you eat and stay.
 
@@ -21,9 +21,9 @@ In Nigeria, there's no place you can **actually trust** for honest restaurant an
 
 ---
 
-## What Revyu does
+## What TalkGround does
 
-Revyu is a review platform built for Nigerians.
+TalkGround is a review platform built for Nigerians.
 
 **Three simple steps:**
 
@@ -33,7 +33,7 @@ Revyu is a review platform built for Nigerians.
 
 ---
 
-## Why Revyu reviews are different
+## Why TalkGround reviews are different
 
 | Feature | What it means for you |
 |---|---|
@@ -47,7 +47,7 @@ Revyu is a review platform built for Nigerians.
 
 ---
 
-## Who is Revyu for?
+## Who is TalkGround for?
 
 - **New to Lagos or Abuja?** Find where to eat and stay — fast.
 - **Eat out every week?** Stop gambling on random picks.
@@ -90,6 +90,6 @@ Early partners get free premium features when subscriptions launch.
 
 ---
 
-**Revyu** — Before you eat or stay, check Revyu.
+**TalkGround** — Before you eat or stay, check TalkGround.
 
 *Share this document or save as PDF for distribution.*

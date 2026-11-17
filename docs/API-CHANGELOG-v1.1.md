@@ -1,4 +1,4 @@
-# Revyu API v1.1 — Security & trust release (frontend migration guide)
+# TalkGround API v1.1 — Security & trust release (frontend migration guide)
 
 **Released:** 17 November 2026 · **Base URL unchanged:** `https://revyu-backend.onrender.com/api/v1`
 **Swagger:** https://revyu-backend.onrender.com/docs (version 1.1)
@@ -16,7 +16,7 @@ post reviews again: **verification screens** and **upload params**. Everything e
 | 2 | **Signup no longer auto-verifies email.** A 6-digit code is emailed on register. | Add an "Enter the code we emailed you" screen (§2.2). |
 | 3 | **Phone OTP really checks the code.** Any code used to be accepted. | Show real errors from `confirm-otp` (`Invalid code`, `Code expired…`, `Too many wrong attempts…`). |
 | 4 | **Cloudinary uploads must post the signed `params`.** `POST /uploads/signature` now signs `allowed_formats` (and `type=authenticated` for receipts). Uploads that omit them fail at Cloudinary with "Invalid Signature". | Post **every key in `data.params`** plus `file`, `api_key`, `signature` to `data.uploadUrl` (§3). |
-| 5 | **`POST /reviews/:id/media` validates the URL.** Only images in Revyu's Cloudinary under `revyu/reviews` (photos) or private `revyu/receipts` (receipts), jpg/jpeg/png/webp, ≤ 5 MB. | Send Cloudinary's `secure_url` unchanged. |
+| 5 | **`POST /reviews/:id/media` validates the URL.** Only images in TalkGround's Cloudinary under `talkground/reviews` (photos) or private `talkground/receipts` (receipts), jpg/jpeg/png/webp, ≤ 5 MB. | Send Cloudinary's `secure_url` unchanged. |
 | 6 | **Receipt responses no longer echo the URL** (it is private). | Show "Receipt submitted" from the 201; don't display the receipt image to the author. |
 | 7 | **Review `edited` now means "the author edited it"** (it used to flip on view counts). New field `editedAt`. | Show "Edited {editedAt}" when `edited` is true. |
 | 8 | **Own-review guards:** you can't vote helpful on or report your own review (`400`); a second open report by the same user is `409`. | Hide those buttons on the author's own review. |
@@ -49,7 +49,7 @@ Every session response (`register`, `login`, `refresh`, `change-password`) retur
 }
 ```
 
-…and sets two HttpOnly cookies: `revyu_at` (access, path `/`) and `revyu_rt` (refresh, path `/api/v1/auth`).
+…and sets two HttpOnly cookies: `talkground_at` (access, path `/`) and `talkground_rt` (refresh, path `/api/v1/auth`).
 
 The API accepts **either** on every protected route (Bearer header is checked first). Pick one mode:
 
@@ -125,9 +125,9 @@ async function api(path: string, init: RequestInit = {}, retry = true): Promise<
 {
   "data": {
     "cloudName": "…", "apiKey": "…", "timestamp": 1763380000, "signature": "…",
-    "folder": "revyu/receipts",
+    "folder": "talkground/receipts",
     "uploadUrl": "https://api.cloudinary.com/v1_1/<cloud>/image/upload",
-    "params": { "timestamp": 1763380000, "folder": "revyu/receipts", "allowed_formats": "jpg,jpeg,png,webp", "type": "authenticated" },
+    "params": { "timestamp": 1763380000, "folder": "talkground/receipts", "allowed_formats": "jpg,jpeg,png,webp", "type": "authenticated" },
     "maxBytes": 5242880,
     "allowedFormats": ["jpg", "jpeg", "png", "webp"]
   }

@@ -43,7 +43,7 @@ apps/web/uploads/
 # OpenAPI local export
 apps/api/openapi.json
 
-# Frontend lives in a separate repo — not part of Revyu-backend
+# Frontend lives in a separate repo — not part of TalkGround-backend
 apps/web/
 
 # Database dumps must never be committed

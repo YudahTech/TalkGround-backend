@@ -1,4 +1,4 @@
-# Revyu — API Specification v1.0
+# TalkGround — API Specification v1.0
 
 **Base URL:** `http://localhost:3001/api/v1` (dev)  
 **Auth:** JWT access token in `Authorization: Bearer <token>` header  

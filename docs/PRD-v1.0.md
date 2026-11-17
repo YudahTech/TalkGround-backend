@@ -1,4 +1,4 @@
-# Revyu — Product Requirements Document v1.0
+# TalkGround — Product Requirements Document v1.0
 
 **Version:** 1.0  
 **Date:** 15 June 2026  
@@ -10,7 +10,7 @@
 
 ## 1. Executive Summary
 
-Revyu is a trust-first review platform for **restaurants and hotels** in **Lagos and Abuja**. MVP success is defined as:
+TalkGround is a trust-first review platform for **restaurants and hotels** in **Lagos and Abuja**. MVP success is defined as:
 
 > Can someone find a Nigerian brand, read credible reviews, and leave a review?
 

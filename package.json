@@ -1,8 +1,8 @@
 {
-  "name": "revyu",
+  "name": "talkground",
   "version": "0.1.0",
   "private": true,
-  "description": "Revyu — Nigeria's trusted review platform",
+  "description": "TalkGround — Nigeria's trusted review platform",
   "workspaces": [
     "apps/api",
     "apps/web"

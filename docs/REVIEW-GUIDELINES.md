@@ -1,12 +1,12 @@
-# Revyu — Review Guidelines
+# TalkGround — Review Guidelines
 
-**For all users posting reviews on Revyu.**
+**For all users posting reviews on TalkGround.**
 
 ---
 
 ## Our standard
 
-Revyu only works when reviews are **honest, specific, and respectful**. These guidelines apply to every review, photo, and receipt upload.
+TalkGround only works when reviews are **honest, specific, and respectful**. These guidelines apply to every review, photo, and receipt upload.
 
 ---
 
@@ -85,7 +85,7 @@ We aim to respond within 48 hours.
 
 ## For businesses
 
-Revyu does not currently offer business account responses. Do not incentivise customers to post reviews on Revyu. Doing so violates these guidelines and may result in removal of affected reviews.
+TalkGround does not currently offer business account responses. Do not incentivise customers to post reviews on TalkGround. Doing so violates these guidelines and may result in removal of affected reviews.
 
 ---
 

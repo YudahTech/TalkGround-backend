@@ -2,8 +2,8 @@ import type { CookieOptions, Request, Response } from 'express';
 import { envFlag } from '../common/security';
 import type { Session } from './auth.service';
 
-export const ACCESS_COOKIE = 'revyu_at';
-export const REFRESH_COOKIE = 'revyu_rt';
+export const ACCESS_COOKIE = 'talkground_at';
+export const REFRESH_COOKIE = 'talkground_rt';
 const REFRESH_PATH = '/api/v1/auth';
 
 /**
@@ -11,7 +11,7 @@ const REFRESH_PATH = '/api/v1/auth';
  * - COOKIE_SECURE   (default: true when NODE_ENV=production)
  * - COOKIE_SAMESITE (lax | strict | none; default lax). A web app on a different site
  *   from the API (e.g. *.vercel.app → *.onrender.com) needs `none` + Secure.
- * - COOKIE_DOMAIN   (optional, e.g. .revyu.ng to share between app. and api.)
+ * - COOKIE_DOMAIN   (optional, e.g. .yourdomain.com to share between app. and api.)
  */
 function baseOptions(): CookieOptions {
   const sameSite = (process.env.COOKIE_SAMESITE ?? 'lax').toLowerCase() as

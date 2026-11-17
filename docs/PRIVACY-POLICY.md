@@ -1,4 +1,4 @@
-# Revyu — Privacy Policy
+# TalkGround — Privacy Policy
 
 **Effective date:** [DATE — set before public launch]  
 **Entity:** [COMPANY NAME LTD]  
@@ -10,7 +10,7 @@ Compliant with the **Nigeria Data Protection Regulation (NDPR)**.
 
 ## 1. Who we are
 
-Revyu is a review platform for restaurants and hotels in Lagos and Abuja. This policy explains how we collect, use, and protect your personal data.
+TalkGround is a review platform for restaurants and hotels in Lagos and Abuja. This policy explains how we collect, use, and protect your personal data.
 
 **Data Controller:** [COMPANY NAME LTD], [registered address]
 
@@ -131,7 +131,7 @@ To exercise rights: privacy@revyu.ng — we respond within 30 days.
 
 ## 10. Children's privacy
 
-Revyu is not intended for users under 18. We do not knowingly collect data from minors.
+TalkGround is not intended for users under 18. We do not knowingly collect data from minors.
 
 ---
 

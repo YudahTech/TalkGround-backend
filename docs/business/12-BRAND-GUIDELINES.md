@@ -1,4 +1,4 @@
-# Revyu — Brand Guidelines
+# TalkGround — Brand Guidelines
 
 **Version 1.0 — June 2026**
 
@@ -8,10 +8,10 @@
 
 | Element | Definition |
 |---|---|
-| **Name** | Revyu |
+| **Name** | TalkGround |
 | **Pronunciation** | "Reh-view" (like "review" with Nigerian warmth) |
 | **Tagline** | Trusted reviews for where you eat and stay. |
-| **Launch line** | Before you eat or stay, check Revyu. |
+| **Launch line** | Before you eat or stay, check TalkGround. |
 | **Personality** | Trustworthy, clear, Nigerian, warm, no-nonsense |
 | **Not** | Corporate, cluttered, aggressive, influencer-hype |
 
@@ -37,7 +37,7 @@
 
 | Name | Hex | RGB | Usage |
 |---|---|---|---|
-| **Revyu Teal** | `#0F766E` | 15, 118, 110 | Primary brand, CTAs, links |
+| **TalkGround Teal** | `#0F766E` | 15, 118, 110 | Primary brand, CTAs, links |
 | **Teal Hover** | `#0D9488` | 13, 148, 136 | Button hover states |
 | **Verified Green** | `#16A34A` | 22, 163, 74 | Verified visit badge |
 | **Amber Star** | `#F59E0B` | 245, 158, 11 | Star ratings |
@@ -76,7 +76,7 @@
 | Marketing | Confident, warm | "Find where to eat in Lagos — reviews you can trust." |
 | Product UI | Clear, helpful | "Write a review" not "Submit your feedback" |
 | Error messages | Direct, not blaming | "Review must be at least 50 characters" |
-| Social media | Conversational, Nigerian | "That jollof was fire? Tell the next person on Revyu." |
+| Social media | Conversational, Nigerian | "That jollof was fire? Tell the next person on TalkGround." |
 | B2B pitch | Professional, value-focused | "Your customers are already talking about you." |
 | Legal | Formal | Standard legal prose |
 
@@ -126,7 +126,7 @@
 1. **Trust education** — "What is a verified visit?"
 2. **City guides** — "Top-reviewed spots in Lekki this week"
 3. **User stories** — Real review highlights (with permission)
-4. **Behind the scenes** — Building Revyu, founder journey
+4. **Behind the scenes** — Building TalkGround, founder journey
 5. **Survey/waitlist** — CTA to join
 
 ---
@@ -135,10 +135,10 @@
 
 | Template | Subject line |
 |---|---|
-| Waitlist welcome | You're on the Revyu list |
-| Launch invite | Revyu is live — you're first in |
-| Survey thank you | Thanks for shaping Revyu |
-| B2B outreach | Get [Business Name] listed on Revyu — free |
+| Waitlist welcome | You're on the TalkGround list |
+| Launch invite | TalkGround is live — you're first in |
+| Survey thank you | Thanks for shaping TalkGround |
+| B2B outreach | Get [Business Name] listed on TalkGround — free |
 
 **Email style:** Plain, personal, from founder name — not "team@noreply"
 
@@ -167,4 +167,4 @@
 
 ---
 
-*Share this document with any designer, marketer, or partner creating Revyu materials.*
+*Share this document with any designer, marketer, or partner creating TalkGround materials.*

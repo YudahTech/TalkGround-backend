@@ -1,4 +1,4 @@
-# Revyu — PDF Exports
+# TalkGround — PDF Exports
 
 All shareable documents exported as PDF. **Markdown sources remain the master** — edit `.md` files, then regenerate PDFs.
 

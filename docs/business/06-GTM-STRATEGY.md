@@ -1,4 +1,4 @@
-# Revyu — Go-to-Market Strategy
+# TalkGround — Go-to-Market Strategy
 
 **Confidential — June 2026**  
 **Launch target:** 1 August 2026
@@ -7,7 +7,7 @@
 
 ## 1. GTM thesis
 
-Revyu wins through **city density**, not nationwide awareness.
+TalkGround wins through **city density**, not nationwide awareness.
 
 **Formula:** Seed supply (brands) → activate demand (waitlist) → prove trust (verification) → monetise (brand subscriptions)
 
@@ -65,10 +65,10 @@ Revyu wins through **city density**, not nationwide awareness.
 | 3 | 1 Aug | Public | Open |
 
 ### Email templates needed
-1. "You're in — Revyu is live for you" (waitlist)
+1. "You're in — TalkGround is live for you" (waitlist)
 2. "Review a place you know" (contributor cohort)
-3. "Lagos brands now on Revyu" (Lagos segment)
-4. "Abuja brands now on Revyu" (Abuja segment)
+3. "Lagos brands now on TalkGround" (Lagos segment)
+4. "Abuja brands now on TalkGround" (Abuja segment)
 
 ---
 
@@ -95,9 +95,9 @@ Revyu wins through **city density**, not nationwide awareness.
 ### Organic
 | Channel | Tactic |
 |---|---|
-| SEO | Brand pages indexed: "{Brand} Reviews Lagos \| Revyu" |
+| SEO | Brand pages indexed: "{Brand} Reviews Lagos \| TalkGround" |
 | WhatsApp | Shareable brand URLs with OG preview cards |
-| Word of mouth | "Check Revyu before you eat" positioning |
+| Word of mouth | "Check TalkGround before you eat" positioning |
 | User suggestions | Community fills brand gaps |
 
 ### Paid (post-funding)
@@ -112,7 +112,7 @@ Revyu wins through **city density**, not nationwide awareness.
 | Partner type | Value exchange |
 |---|---|
 | Food bloggers | Early access + co-branded content |
-| NYSC orientation | "New to the city" guide featuring Revyu |
+| NYSC orientation | "New to the city" guide featuring TalkGround |
 | Co-working spaces | Poster/QR in Lagos hubs |
 | Hotel booking platforms | Cross-link (future) |
 
@@ -125,7 +125,7 @@ See **B2B Partnership Pitch** document.
 **Sequence:**
 1. Prove density (200+ brands, 500+ reviews)
 2. Identify top-reviewed brands
-3. Pitch: "Your customers are already talking about you on Revyu"
+3. Pitch: "Your customers are already talking about you on TalkGround"
 4. Offer free 3-month pilot → convert to subscription
 
 ---

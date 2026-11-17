@@ -1,4 +1,4 @@
-# Revyu — System design & security
+# TalkGround — System design & security
 
 **Audience:** Backend owner + anyone joining the project  
 **Stack:** NestJS · PostgreSQL · Prisma · JWT · (optional) Cloudinary · Termii
@@ -14,13 +14,13 @@
 | Default | `false` |
 | Effect on UI | Show “Claimed” / verified-business badge |
 | Effect on trust | `+10` points in `computeTrustScore` (max contribution from claim) |
-| Who can set it | **Only Revyu ADMIN** via `POST/PATCH /admin/brands` |
+| Who can set it | **Only TalkGround ADMIN** via `POST/PATCH /admin/brands` |
 | Public claim flow | **None in v1** — no “Claim this business” endpoint |
 
 ### How a company “achieves” claimed: true (v1)
 
-1. Brand exists on Revyu (admin creates it, or admin approves a user suggestion).
-2. Revyu team verifies the business offline (phone call, email from official domain, documents, etc.).
+1. Brand exists on TalkGround (admin creates it, or admin approves a user suggestion).
+2. TalkGround team verifies the business offline (phone call, email from official domain, documents, etc.).
 3. Admin calls:
 
 ```http
@@ -63,7 +63,7 @@ Future (not built): owner signup → email/domain proof → pending claim → ad
 
 ### 2.2 NestJS building blocks (every concept used)
 
-| Concept | What it is in Revyu |
+| Concept | What it is in TalkGround |
 |---------|---------------------|
 | **Module** | Feature box (`AuthModule`, `BrandsModule`, …). Declares controllers + providers. |
 | **Controller** | HTTP routes only — parse params/body, call service, return JSON. |

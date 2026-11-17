@@ -1,4 +1,4 @@
-# Revyu — Deployment Guide
+# TalkGround — Deployment Guide
 
 **Target launch:** 1 August 2026
 
@@ -70,7 +70,7 @@ PORT=3001
 CORS_ORIGIN=https://revyu.ng
 OTP_DEV_MODE=false
 TERMII_API_KEY=...
-TERMII_SENDER_ID=Revyu
+TERMII_SENDER_ID=TalkGround
 CLOUDINARY_CLOUD_NAME=...
 CLOUDINARY_API_KEY=...
 CLOUDINARY_API_SECRET=...

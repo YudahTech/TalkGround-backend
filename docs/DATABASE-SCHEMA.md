@@ -1,4 +1,4 @@
-# Revyu — Database Schema Reference
+# TalkGround — Database Schema Reference
 
 **ORM:** Prisma 5  
 **Database:** PostgreSQL 16  

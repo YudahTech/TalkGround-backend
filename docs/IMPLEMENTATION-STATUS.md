@@ -1,4 +1,4 @@
-# Revyu — Implementation Status
+# TalkGround — Implementation Status
 
 **Last updated:** 15 June 2026
 

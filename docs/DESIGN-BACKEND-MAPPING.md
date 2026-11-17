@@ -1,4 +1,4 @@
-# Revyu — Design → Backend Mapping
+# TalkGround — Design → Backend Mapping
 
 **Audience:** Frontend + backend developers  
 **Product scope:** Restaurants & hotels in **Lagos** and **Abuja** only  

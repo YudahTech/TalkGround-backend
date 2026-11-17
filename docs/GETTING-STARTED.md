@@ -1,13 +1,13 @@
-# Revyu — Getting Started (Developer Guide)
+# TalkGround — Getting Started (Developer Guide)
 
-**Audience:** Developers joining the Revyu project  
+**Audience:** Developers joining the TalkGround project  
 **Project path:** `c:\Users\USER\Desktop\revyu`
 
 ---
 
-## 1. What is Revyu?
+## 1. What is TalkGround?
 
-Revyu is a **trust-first review platform** for restaurants and hotels in **Lagos and Abuja**. MVP success = users can find a brand, read credible reviews, and leave their own.
+TalkGround is a **trust-first review platform** for restaurants and hotels in **Lagos and Abuja**. MVP success = users can find a brand, read credible reviews, and leave their own.
 
 This is a **separate project** from `bango-market-day-frontend`. Do not mix the two repos.
 
@@ -18,7 +18,7 @@ This is a **separate project** from `bango-market-day-frontend`. Do not mix the 
 ### Monorepo structure
 
 ```
-revyu/
+talkground/
 ├── docs/                    # All product + engineering documentation
 ├── apps/
 │   ├── api/                 # NestJS backend (port 3001)

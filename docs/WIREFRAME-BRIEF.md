@@ -1,4 +1,4 @@
-# Revyu — Wireframe Brief v1.0
+# TalkGround — Wireframe Brief v1.0
 
 Page-by-page UI specification for design and frontend implementation.
 
@@ -58,7 +58,7 @@ Page-by-page UI specification for design and frontend implementation.
    - Two large cards: Restaurants | Hotels & Stays
 
 6. **CTA band**
-   - "Help us build Revyu" → Survey + Waitlist buttons
+   - "Help us build TalkGround" → Survey + Waitlist buttons
 
 ---
 

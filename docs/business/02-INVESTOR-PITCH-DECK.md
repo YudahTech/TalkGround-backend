@@ -1,4 +1,4 @@
-# Revyu — Investor Pitch Deck
+# TalkGround — Investor Pitch Deck
 
 **Slide content for Google Slides, PowerPoint, or Canva**  
 **Confidential — June 2026**
@@ -9,7 +9,7 @@
 
 ## Slide 1 — Title
 
-**Revyu**  
+**TalkGround**  
 Trusted reviews for where you eat and stay.
 
 Lagos & Abuja | Launch August 2026
@@ -50,7 +50,7 @@ Lagos & Abuja | Launch August 2026
 
 ## Slide 4 — The solution
 
-**Revyu: Search → Read → Review**
+**TalkGround: Search → Read → Review**
 
 A review platform built for trust, not volume.
 
@@ -64,7 +64,7 @@ A review platform built for trust, not volume.
 
 ## Slide 5 — Trust moat
 
-**Why people will believe Revyu reviews**
+**Why people will believe TalkGround reviews**
 
 | Layer | How |
 |---|---|
@@ -121,7 +121,7 @@ A review platform built for trust, not volume.
 
 ## Slide 9 — Competition
 
-| Player | Weakness | Revyu |
+| Player | Weakness | TalkGround |
 |---|---|---|
 | Google Maps | Shallow local depth | City-first density |
 | Ratecrest / Krediview | Low engagement | Verification + moderation |
@@ -199,13 +199,13 @@ A review platform built for trust, not volume.
 **2027:** Nigeria's default "check before you go" platform  
 **2028:** Every major Nigerian city; multiple categories
 
-> "Before you eat or stay — check Revyu."
+> "Before you eat or stay — check TalkGround."
 
 ---
 
 ## Slide 15 — Thank you
 
-**Revyu**  
+**TalkGround**  
 [FOUNDER NAME]  
 [EMAIL] | [PHONE]  
 revyu.ng/waitlist

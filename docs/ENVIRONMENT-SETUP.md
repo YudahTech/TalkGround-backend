@@ -1,4 +1,4 @@
-# Revyu — Environment Setup
+# TalkGround — Environment Setup
 
 ---
 
@@ -85,7 +85,7 @@ copy apps\web\.env.example apps\web\.env.local
 
 1. Sign up at https://termii.com
 2. Get API key from dashboard
-3. Register sender ID (e.g. `Revyu`)
+3. Register sender ID (e.g. `TalkGround`)
 4. Set `OTP_DEV_MODE=false` and add keys to `.env`
 
 ### 3. PostgreSQL options

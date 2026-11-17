@@ -1,8 +1,8 @@
-# Revyu — Survey Results Report
+# TalkGround — Survey Results Report
 
 **Validation study — Restaurants & hotels in Lagos & Abuja**  
 **Report date:** [FILL IN AFTER CAMPAIGN]  
-**Prepared by:** Revyu Founding Team
+**Prepared by:** TalkGround Founding Team
 
 ---
 
@@ -10,7 +10,7 @@
 
 *[Write 3–4 sentences after data collection. Example template:]*
 
-Revyu surveyed **[X] respondents** across Lagos and Abuja to validate demand for a trusted local review platform. **[X]%** rated finding trustworthy restaurant/hotel information as difficult (4–5 out of 5). **[X]%** said they would use a dedicated platform before making decisions. **[X]%** indicated that receipt-verified reviews would increase their trust. These results confirm [strong/moderate] product-market fit signal for Revyu ahead of our August 2026 launch.
+TalkGround surveyed **[X] respondents** across Lagos and Abuja to validate demand for a trusted local review platform. **[X]%** rated finding trustworthy restaurant/hotel information as difficult (4–5 out of 5). **[X]%** said they would use a dedicated platform before making decisions. **[X]%** indicated that receipt-verified reviews would increase their trust. These results confirm [strong/moderate] product-market fit signal for TalkGround ahead of our August 2026 launch.
 
 ---
 
@@ -129,9 +129,9 @@ Revyu surveyed **[X] respondents** across Lagos and Abuja to validate demand for
 
 ---
 
-### Finding 5 — Demand for Revyu
+### Finding 5 — Demand for TalkGround
 
-**Q12: Would you use Revyu before deciding?**
+**Q12: Would you use TalkGround before deciding?**
 
 | Score | % |
 |---|---|

@@ -1,4 +1,4 @@
-# Revyu — Launch Waitlist Instrument
+# TalkGround — Launch Waitlist Instrument
 
 **Purpose:** Capture launch-ready users for controlled rollout  
 **Route:** `/waitlist`  
@@ -39,11 +39,11 @@
 
 ## Consent Copy
 
-> I agree to be contacted by Revyu about the launch and I have read the Privacy Policy.
+> I agree to be contacted by TalkGround about the launch and I have read the Privacy Policy.
 
 **Microcopy below form:**
 
-> We will only use your details to notify you about Revyu. No spam. You can request deletion at any time.
+> We will only use your details to notify you about TalkGround. No spam. You can request deletion at any time.
 
 ---
 
@@ -51,7 +51,7 @@
 
 **Headline:** You're on the list.
 
-**Body:** We'll email you when Revyu goes live in Lagos and Abuja. You'll be among the first to search, read, and write trusted reviews.
+**Body:** We'll email you when TalkGround goes live in Lagos and Abuja. You'll be among the first to search, read, and write trusted reviews.
 
 **Secondary CTA:** While you wait — take our 3-minute survey. [Take survey →]
 

@@ -20,10 +20,10 @@ async function bootstrap() {
   );
 
   const swaggerConfig = new DocumentBuilder()
-    .setTitle('Revyu API')
+    .setTitle('TalkGround API')
     .setDescription(
       [
-        'Revyu REST API — restaurants & hotels in Lagos & Abuja.',
+        'TalkGround REST API — restaurants & hotels in Lagos & Abuja.',
         '',
         '## How to use Swagger',
         '1. **Auth** → `POST /auth/login` → copy `data.accessToken`',
@@ -70,7 +70,7 @@ async function bootstrap() {
 
   const port = process.env.PORT ?? 3001;
   await app.listen(port);
-  console.log(`Revyu API running on http://localhost:${port}/api/v1`);
+  console.log(`TalkGround API running on http://localhost:${port}/api/v1`);
   console.log(`Swagger UI: http://localhost:${port}/docs`);
   console.log(`OpenAPI JSON: http://localhost:${port}/docs/openapi.json`);
 }

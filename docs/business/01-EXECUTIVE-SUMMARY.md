@@ -1,10 +1,10 @@
-# Revyu — Executive Summary
+# TalkGround — Executive Summary
 
 **Confidential**  
 **June 2026**
 
 **Company:** [COMPANY NAME LTD]  
-**Product:** Revyu — Nigeria's trusted review platform  
+**Product:** TalkGround — Nigeria's trusted review platform  
 **Founders:** [FOUNDER 1 NAME], [FOUNDER 2 NAME]  
 **Contact:** [EMAIL] | [PHONE]  
 **Website:** revyu.ng (pre-launch)
@@ -13,7 +13,7 @@
 
 ## One sentence
 
-Revyu is where Nigerians find trusted reviews for restaurants and hotels in Lagos and Abuja — starting with receipt-verified reviews no competitor offers at local depth.
+TalkGround is where Nigerians find trusted reviews for restaurants and hotels in Lagos and Abuja — starting with receipt-verified reviews no competitor offers at local depth.
 
 ---
 
@@ -29,7 +29,7 @@ They check Google Maps (thin local coverage), scroll Twitter (unstructured hype)
 
 ## The solution
 
-Revyu is a review platform built for one job: help people **find, read, and write** trustworthy reviews for restaurants and hotels.
+TalkGround is a review platform built for one job: help people **find, read, and write** trustworthy reviews for restaurants and hotels.
 
 **Core loop:** Search → Read → Review
 
@@ -82,7 +82,7 @@ Revyu is a review platform built for one job: help people **find, read, and writ
 
 ## Competitive advantage
 
-| vs. Competitor | Revyu wins because… |
+| vs. Competitor | TalkGround wins because… |
 |---|---|
 | Google Maps | Deeper Lagos/Abuja coverage; verification badges |
 | Twitter / WhatsApp | Structured, searchable, moderated |

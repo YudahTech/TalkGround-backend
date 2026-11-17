@@ -1,4 +1,4 @@
-# Revyu — B2B Partnership Pitch
+# TalkGround — B2B Partnership Pitch
 
 **For restaurants, hotels, and hospitality businesses**  
 **June 2026**
@@ -7,13 +7,13 @@
 
 ## Dear [BUSINESS OWNER NAME],
 
-Your customers are already talking about you — on Twitter, in WhatsApp groups, and to their friends. **Revyu gives those conversations a home people can actually find and trust.**
+Your customers are already talking about you — on Twitter, in WhatsApp groups, and to their friends. **TalkGround gives those conversations a home people can actually find and trust.**
 
 ---
 
-## What is Revyu?
+## What is TalkGround?
 
-Revyu is Nigeria's trusted review platform for **restaurants and hotels** — starting in Lagos and Abuja.
+TalkGround is Nigeria's trusted review platform for **restaurants and hotels** — starting in Lagos and Abuja.
 
 We help consumers find great places. We help businesses like yours **get discovered by people who are actively looking.**
 
@@ -21,7 +21,7 @@ We help consumers find great places. We help businesses like yours **get discove
 
 ---
 
-## Why should your business be on Revyu?
+## Why should your business be on TalkGround?
 
 ### 1. Your future customers are looking right now
 
@@ -37,11 +37,11 @@ We help consumers find great places. We help businesses like yours **get discove
 - Phone-verified reviewers — real people, not bots
 - Moderated content — spam and fake reviews removed
 
-**Consumers trust Revyu reviews more than Instagram hype.**
+**Consumers trust TalkGround reviews more than Instagram hype.**
 
 ### 3. Good businesses deserve visibility
 
-You've built something worth talking about. Revyu surfaces that — structured, searchable, permanent.
+You've built something worth talking about. TalkGround surfaces that — structured, searchable, permanent.
 
 ---
 
@@ -80,7 +80,7 @@ We're manually adding restaurants and hotels in Lagos and Abuja. If you'd like t
 **[FOUNDER EMAIL]** | **[PHONE]**
 
 ### Option 2 — Your customers suggest you
-Any Revyu user can suggest a missing business. We verify and approve within 48 hours.
+Any TalkGround user can suggest a missing business. We verify and approve within 48 hours.
 
 ### Option 3 — Self-list (coming soon)
 Business owners will be able to claim and manage their page directly.
@@ -131,13 +131,13 @@ To create your listing, we need:
 
 1. **Reply to this email** with your business details (or use the form below)
 2. We add your listing before launch
-3. Share Revyu with your customers after launch — "Review us on Revyu"
+3. Share TalkGround with your customers after launch — "Review us on TalkGround"
 4. Early partners get free subscription access when it launches
 
 **Contact:** [FOUNDER NAME] — [EMAIL] — [PHONE]
 
 ---
 
-**Revyu** — Trusted reviews for where you eat and stay.
+**TalkGround** — Trusted reviews for where you eat and stay.
 
 *This document is for business development use. Customise per prospect.*

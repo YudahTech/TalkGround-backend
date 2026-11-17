@@ -29,7 +29,7 @@ const MINUTE = 60_000;
 
 /**
  * Session responses always include `accessToken` + `refreshToken` in the body (Bearer clients)
- * AND set HttpOnly cookies `revyu_at` / `revyu_rt` (cookie clients). Use one or the other.
+ * AND set HttpOnly cookies `talkground_at` / `talkground_rt` (cookie clients). Use one or the other.
  */
 @ApiTags('Auth')
 @Controller('auth')
@@ -81,7 +81,7 @@ export class AuthController {
     summary:
       'Exchange a refresh token for a new access + refresh token (rotation)',
     description:
-      'Send { refreshToken } or rely on the revyu_rt cookie. The old refresh token stops working. ' +
+      'Send { refreshToken } or rely on the talkground_rt cookie. The old refresh token stops working. ' +
       'Replaying an already-used refresh token signs the user out everywhere.',
   })
   @ApiBody({ type: RefreshDto })

@@ -1,5 +1,5 @@
 /**
- * Generate PDF exports for all shareable Revyu documents.
+ * Generate PDF exports for all shareable TalkGround documents.
  * Run: npm run docs:pdf
  *
  * Output:
@@ -116,7 +116,7 @@ async function generate() {
   let ok = 0;
   let fail = 0;
 
-  console.log('Revyu — generating PDF exports\n');
+  console.log('TalkGround — generating PDF exports\n');
   console.log('Markdown-only (not exported):');
   MARKDOWN_ONLY.forEach((f) => console.log(`  · ${f}`));
   console.log('');

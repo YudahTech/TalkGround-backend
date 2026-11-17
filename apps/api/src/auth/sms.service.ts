@@ -25,7 +25,7 @@ export class SmsService {
 
   async sendOtp(phone: string, code: string): Promise<boolean> {
     const apiKey = this.config.get('TERMII_API_KEY');
-    const senderId = this.config.get('TERMII_SENDER_ID', 'Revyu');
+    const senderId = this.config.get('TERMII_SENDER_ID', 'TalkGround');
 
     if (!apiKey) {
       this.logger.warn('TERMII_API_KEY not set — SMS not sent (set OTP_DEV_MODE=true for local testing)');
@@ -33,7 +33,7 @@ export class SmsService {
     }
 
     const to = this.formatPhone(phone);
-    const message = `Your Revyu verification code is ${code}. Valid for 10 minutes.`;
+    const message = `Your TalkGround verification code is ${code}. Valid for 10 minutes.`;
 
     try {
       const res = await fetch('https://api.ng.termii.com/api/sms/send', {

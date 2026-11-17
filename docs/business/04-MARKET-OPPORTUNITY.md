@@ -1,4 +1,4 @@
-# Revyu — Market Opportunity Brief
+# TalkGround — Market Opportunity Brief
 
 **Confidential — June 2026**
 
@@ -6,7 +6,7 @@
 
 ## 1. Executive summary
 
-Revyu addresses a **trust deficit** in how Nigerians discover restaurants and hotels — a high-frequency, high-emotion decision happening millions of times per month in Lagos and Abuja alone.
+TalkGround addresses a **trust deficit** in how Nigerians discover restaurants and hotels — a high-frequency, high-emotion decision happening millions of times per month in Lagos and Abuja alone.
 
 The opportunity is not "create another review app." It is to become the **default trust layer** for local dining and hospitality in Nigeria's two largest urban markets — then expand.
 
@@ -95,11 +95,11 @@ Key questions designed to quantify:
 | Twitter / Instagram | High | Very Low | None | None |
 | WhatsApp groups | Medium | Medium | None | Not searchable |
 
-**Gap Revyu fills:** Structured + searchable + verified + city-dense.
+**Gap TalkGround fills:** Structured + searchable + verified + city-dense.
 
 ---
 
-## 6. Market trends supporting Revyu
+## 6. Market trends supporting TalkGround
 
 1. **Rising eat-out culture** — urban professionals time-poor, dining out default
 2. **Short-let explosion** — Airbnb-style stays need review layer beyond photos
@@ -151,7 +151,7 @@ Key questions designed to quantify:
 
 The market opportunity is not creating demand for reviews — Nigerians already seek them constantly. The opportunity is **owning trust** in two cities first, then scaling what works.
 
-**Revyu is positioned to be that trust layer.**
+**TalkGround is positioned to be that trust layer.**
 
 ---
 

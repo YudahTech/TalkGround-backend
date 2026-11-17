@@ -1,4 +1,4 @@
-# Revyu — Acceptance Test Checklist
+# TalkGround — Acceptance Test Checklist
 
 Use this before soft launch and public launch. Mark each item Pass / Fail / N/A.
 

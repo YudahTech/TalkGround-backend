@@ -1,4 +1,4 @@
-# Revyu — Investor One-Pager
+# TalkGround — Investor One-Pager
 
 **Confidential — June 2026**
 
@@ -14,7 +14,7 @@ Nigerians choosing where to eat or stay — especially in Lagos and Abuja — la
 
 ## The Solution
 
-**Revyu** is a review platform built exclusively for Nigerian restaurants and hotels — starting with Lagos and Abuja.
+**TalkGround** is a review platform built exclusively for Nigerian restaurants and hotels — starting with Lagos and Abuja.
 
 **Core loop:** Search → Read trusted reviews → Write your own.
 
@@ -65,13 +65,13 @@ MVP is free for users and brands. Revenue activates once density proves value.
 
 ## Competitive Landscape
 
-| Player | Gap Revyu fills |
+| Player | Gap TalkGround fills |
 |---|---|
 | Google Maps | Inconsistent local depth |
 | Nigerian review sites | Low engagement, weak verification |
 | Social media | Unstructured, hype-driven |
 
-**Revyu differentiation:** Receipt verification + city-first density + moderation from day one.
+**TalkGround differentiation:** Receipt verification + city-first density + moderation from day one.
 
 ---
 

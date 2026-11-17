@@ -1,4 +1,4 @@
-# Revyu API — Endpoint Testing Guide
+# TalkGround API — Endpoint Testing Guide
 
 **For:** Backend developers and QA  
 **Tools:** Swagger UI (`http://localhost:3001/docs`), Postman, or curl  

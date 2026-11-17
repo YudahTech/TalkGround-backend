@@ -1,10 +1,10 @@
-# Revyu — Docker Setup
+# TalkGround — Docker Setup
 
 ---
 
 ## What Docker is used for
 
-Revyu uses Docker **only for PostgreSQL** in local development. The API and web apps run directly with Node.js (not containerized yet).
+TalkGround uses Docker **only for PostgreSQL** in local development. The API and web apps run directly with Node.js (not containerized yet).
 
 ---
 
@@ -81,7 +81,7 @@ cd apps/api && npm run prisma:studio
 
 ## docker-compose.yml reference
 
-Located at project root: `revyu/docker-compose.yml`
+Located at project root: `talkground/docker-compose.yml`
 
 ```yaml
 services:

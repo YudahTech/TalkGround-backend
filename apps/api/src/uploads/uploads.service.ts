@@ -68,7 +68,7 @@ export class UploadsService {
     const cloudName = this.config.get<string>('CLOUDINARY_CLOUD_NAME')!;
     const apiKey = this.config.get<string>('CLOUDINARY_API_KEY')!;
     const apiSecret = this.config.get<string>('CLOUDINARY_API_SECRET')!;
-    const uploadFolder = `revyu/${folder}`;
+    const uploadFolder = `talkground/${folder}`;
 
     const params: Record<string, string | number> = {
       timestamp,
@@ -104,13 +104,13 @@ export class UploadsService {
     const pattern = new RegExp(
       `^https://res\\.cloudinary\\.com/${escapeRegex(cloudName)}/image/(upload|authenticated)/` +
         `(?:s--[A-Za-z0-9_-]+--/)?(?:v\\d+/)?` +
-        `(revyu/${folder}/[A-Za-z0-9_\\-/]+)\\.(${ALLOWED_FORMATS.join('|')})$`,
+        `(talkground/${folder}/[A-Za-z0-9_\\-/]+)\\.(${ALLOWED_FORMATS.join('|')})$`,
       'i',
     );
     const match = pattern.exec(url);
     if (!match || url.includes('..')) {
       throw new BadRequestException(
-        `Invalid image URL: upload to revyu/${folder} in Revyu's Cloudinary account first`,
+        `Invalid image URL: upload to talkground/${folder} in TalkGround's Cloudinary account first`,
       );
     }
     const [, deliveryType, publicId, format] = match;

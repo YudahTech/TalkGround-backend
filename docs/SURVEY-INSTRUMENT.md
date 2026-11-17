@@ -1,4 +1,4 @@
-# Revyu — Validation Survey Instrument
+# TalkGround — Validation Survey Instrument
 
 **Purpose:** B2B validation & problem quantification  
 **Route:** `/survey`  
@@ -180,7 +180,7 @@ What is the single biggest problem with reviews in Nigeria today? *(Max 300 char
 
 ## Q19. Contact opt-in
 
-May we email you when Revyu launches?
+May we email you when TalkGround launches?
 
 - Yes → show email field | No → End
 

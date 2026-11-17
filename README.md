@@ -1,6 +1,6 @@
-# Revyu Backend
+# TalkGround Backend
 
-NestJS + Prisma + PostgreSQL API for **Revyu** — trusted reviews for restaurants and hotels in Lagos & Abuja.
+NestJS + Prisma + PostgreSQL API for **TalkGround** — trusted reviews for restaurants and hotels in Lagos & Abuja.
 
 ## For frontend developers
 

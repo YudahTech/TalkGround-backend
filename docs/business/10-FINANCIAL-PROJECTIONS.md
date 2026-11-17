@@ -1,4 +1,4 @@
-# Revyu — Financial Projections (Template)
+# TalkGround — Financial Projections (Template)
 
 **Confidential — June 2026**  
 **Status:** Template — fill assumptions before investor meetings

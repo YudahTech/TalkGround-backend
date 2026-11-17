@@ -1,4 +1,4 @@
-# Revyu — Launch Runbook
+# TalkGround — Launch Runbook
 
 **Soft launch:** 28 July 2026  
 **Public launch:** 1 August 2026  
@@ -63,7 +63,7 @@
 | Item | Detail |
 |---|---|
 | Size | First 50% of waitlist |
-| Email | "You're in — Revyu is live for you" |
+| Email | "You're in — TalkGround is live for you" |
 | CTA | Review a brand you know |
 
 ### Wave 2 — Remaining waitlist (31 July)

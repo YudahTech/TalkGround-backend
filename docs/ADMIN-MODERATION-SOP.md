@@ -1,4 +1,4 @@
-# Revyu — Admin Moderation Standard Operating Procedure
+# TalkGround — Admin Moderation Standard Operating Procedure
 
 **Version:** 1.0  
 **Owner:** Founders  
@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-This SOP defines how Revyu founders moderate content at launch. Consistent moderation builds trust and reduces legal exposure.
+This SOP defines how TalkGround founders moderate content at launch. Consistent moderation builds trust and reduces legal exposure.
 
 **Principles:**
 1. Never auto-remove flagged content without human review

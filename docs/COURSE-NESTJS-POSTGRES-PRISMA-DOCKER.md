@@ -1,6 +1,6 @@
 # Refresher Course: NestJS, PostgreSQL, Prisma & Docker
 
-**Built for the Revyu project** — every concept maps to real code in `c:\Users\USER\Desktop\revyu`
+**Built for the TalkGround project** — every concept maps to real code in `c:\Users\USER\Desktop\revyu`
 
 **Estimated time:** 12–16 hours (self-paced)  
 **Level:** Intermediate refresh (you've touched these before; this reconnects theory to practice)
@@ -10,7 +10,7 @@
 ## How to use this course
 
 1. Read each module in order (Docker → Postgres → Prisma → NestJS)
-2. After each lesson, open the referenced Revyu file and read the actual code
+2. After each lesson, open the referenced TalkGround file and read the actual code
 3. Complete the **Exercise** before moving on
 4. Use the **Cheat sheet** at the end for daily reference
 
@@ -29,9 +29,9 @@ Docker packages software into **containers** — lightweight, isolated environme
 | **Volume** | Persistent storage (survives container restart) |
 | **docker-compose** | Run multiple containers with one command |
 
-**In Revyu:** We use Docker only for PostgreSQL. API and web run with Node directly.
+**In TalkGround:** We use Docker only for PostgreSQL. API and web run with Node directly.
 
-**File:** `revyu/docker-compose.yml`
+**File:** `talkground/docker-compose.yml`
 
 ---
 
@@ -48,7 +48,7 @@ docker compose down -v      # Remove containers AND data (destructive)
 
 ---
 
-## 1.3 Reading Revyu's docker-compose.yml
+## 1.3 Reading TalkGround's docker-compose.yml
 
 ```yaml
 services:
@@ -70,7 +70,7 @@ services:
 
 ## 1.4 Exercise
 
-1. Run `docker compose up -d` in `revyu/`
+1. Run `docker compose up -d` in `talkground/`
 2. Run `docker compose ps` — confirm postgres is "running"
 3. Connect with `npx prisma studio` from `apps/api`
 4. Run `docker compose stop` then `docker compose up -d` — confirm data still there
@@ -134,7 +134,7 @@ VALUES (gen_random_uuid(), 'Test Spot', 'test-spot', 'RESTAURANTS', 'LAGOS', 'Ya
 
 ---
 
-## 2.3 Revyu data model (simplified)
+## 2.3 TalkGround data model (simplified)
 
 ```
 User (1) ──── writes ──── (N) Review (N) ──── about ──── (1) Brand
@@ -166,7 +166,7 @@ See full reference: `docs/DATABASE-SCHEMA.md`
 | Stores the data | Generates TypeScript types and query methods |
 | You *can* write raw SQL | You write `prisma.user.findMany()` instead |
 
-**Rule:** In Revyu, always use Prisma in application code. Use raw SQL only for debugging in Prisma Studio or psql.
+**Rule:** In TalkGround, always use Prisma in application code. Use raw SQL only for debugging in Prisma Studio or psql.
 
 ---
 
@@ -180,7 +180,7 @@ See full reference: `docs/DATABASE-SCHEMA.md`
 | `prisma/migrations/` | SQL history of schema changes |
 | `prisma/seed.ts` | Initial data (admin user, sample brands) |
 
-**Revyu schema:** `apps/api/prisma/schema.prisma`
+**TalkGround schema:** `apps/api/prisma/schema.prisma`
 
 ---
 
@@ -242,7 +242,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
 }
 ```
 
-**Common queries in Revyu:**
+**Common queries in TalkGround:**
 
 ```typescript
 // Find one
@@ -293,7 +293,7 @@ await this.prisma.$transaction([
 
 ---
 
-## 3.5 Reading Revyu examples
+## 3.5 Reading TalkGround examples
 
 | Feature | File to study |
 |---|---|
@@ -347,7 +347,7 @@ A **Node.js framework** for building APIs. Think of it as organised Express with
 - **Filters** — error handling
 - **Dependency Injection** — automatic wiring
 
-**Revyu API entry:** `apps/api/src/main.ts`
+**TalkGround API entry:** `apps/api/src/main.ts`
 
 ---
 
@@ -395,7 +395,7 @@ Exception Filter (if error thrown)
 export class BrandsModule {}
 ```
 
-**Revyu modules map:**
+**TalkGround modules map:**
 
 | Module | Responsibility |
 |---|---|
@@ -575,7 +575,7 @@ export class HealthController {
 
 ---
 
-## 4.11 Reading order for Revyu API
+## 4.11 Reading order for TalkGround API
 
 Study these files in this order:
 
@@ -594,7 +594,7 @@ Study these files in this order:
 
 ---
 
-# Module 5: How it all connects in Revyu (2 hours)
+# Module 5: How it all connects in TalkGround (2 hours)
 
 ## 5.1 Full stack flow: User writes a review
 
@@ -718,4 +718,4 @@ Enum → PostgreSQL ENUM
 
 ---
 
-**Course complete.** You now have the foundation to work on every part of Revyu. Open `docs/GETTING-STARTED.md` and start building.
+**Course complete.** You now have the foundation to work on every part of TalkGround. Open `docs/GETTING-STARTED.md` and start building.

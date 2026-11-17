@@ -1,9 +1,9 @@
-# Revyu — Railway deployment (legacy)
+# TalkGround — Railway deployment (legacy)
 
 > **Prefer Render.** Railway free trial expired for this project.  
 > Use **[RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md)** for the live API.
 
-**Repo:** https://github.com/YudahTech/Revyu-backend  
+**Repo:** https://github.com/YudahTech/TalkGround-backend  
 **Goal:** Live API + Swagger URL you can send to the frontend developer.
 
 ---
@@ -18,13 +18,13 @@
 
 GitHub docs (already public):
 
-- https://github.com/YudahTech/Revyu-backend/blob/master/docs/FRONTEND-INTEGRATION.md
+- https://github.com/YudahTech/TalkGround-backend/blob/master/docs/FRONTEND-INTEGRATION.md
 
 ---
 
 ## Prerequisites
 
-1. GitHub account with `Revyu-backend` pushed (done)
+1. GitHub account with `TalkGround-backend` pushed (done)
 2. Railway account: https://railway.app → Sign up with GitHub
 3. Docker/local API working (optional, for comparison)
 
@@ -34,7 +34,7 @@ GitHub docs (already public):
 
 1. Open https://railway.app/new
 2. Choose **Deploy from GitHub repo**
-3. Authorize Railway → select **YudahTech/Revyu-backend**
+3. Authorize Railway → select **YudahTech/TalkGround-backend**
 4. Create the project
 
 ---
@@ -121,7 +121,7 @@ Railway injects `PORT` automatically. Your `main.ts` already uses `process.env.P
 | Variable | When needed |
 |----------|-------------|
 | `TERMII_API_KEY` | Real SMS OTP |
-| `TERMII_SENDER_ID` | e.g. `Revyu` (approved sender) |
+| `TERMII_SENDER_ID` | e.g. `TalkGround` (approved sender) |
 | `CLOUDINARY_CLOUD_NAME` | Photo / avatar uploads |
 | `CLOUDINARY_API_KEY` | Uploads |
 | `CLOUDINARY_API_SECRET` | Uploads |
@@ -135,7 +135,7 @@ JWT_EXPIRES_IN=7d
 CORS_ORIGIN=http://localhost:3000
 OTP_DEV_MODE=true
 TERMII_API_KEY=
-TERMII_SENDER_ID=Revyu
+TERMII_SENDER_ID=TalkGround
 CLOUDINARY_CLOUD_NAME=
 CLOUDINARY_API_KEY=
 CLOUDINARY_API_SECRET=
@@ -169,7 +169,7 @@ OpenAPI: https://THAT-HOST/docs/openapi.json
 
 ```text
 Nest application successfully started
-Revyu API running on http://localhost:PORT/api/v1
+TalkGround API running on http://localhost:PORT/api/v1
 Swagger UI: http://localhost:PORT/docs
 ```
 
@@ -238,10 +238,10 @@ In browser:
 When Steps 5–8 pass:
 
 ```text
-Repo: https://github.com/YudahTech/Revyu-backend
+Repo: https://github.com/YudahTech/TalkGround-backend
 
 Integration guide:
-https://github.com/YudahTech/Revyu-backend/blob/master/docs/FRONTEND-INTEGRATION.md
+https://github.com/YudahTech/TalkGround-backend/blob/master/docs/FRONTEND-INTEGRATION.md
 
 Staging API:  https://YOUR-HOST/api/v1
 Swagger:      https://YOUR-HOST/docs

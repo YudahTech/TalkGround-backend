@@ -22,7 +22,7 @@ services:
       - key: REFRESH_TOKEN_TTL_DAYS
         value: "30"
       - key: EMAIL_FROM_NAME
-        value: "Revyu"
+        value: "TalkGround"
       - key: BREVO_API_KEY
         sync: false
       - key: EMAIL_FROM

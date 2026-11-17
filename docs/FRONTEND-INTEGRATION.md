@@ -1,4 +1,4 @@
-# Revyu — Frontend Integration Guide
+# TalkGround — Frontend Integration Guide
 
 **Audience:** Frontend developers (separate repo)  
 **Backend owner:** API team  
@@ -18,10 +18,10 @@
 | **API base URL** | `https://revyu-backend.onrender.com/api/v1` |
 | **Swagger UI** | https://revyu-backend.onrender.com/docs |
 | **OpenAPI JSON** | https://revyu-backend.onrender.com/docs/openapi.json |
-| **This guide (GitHub)** | https://github.com/YudahTech/Revyu-backend/blob/master/docs/FRONTEND-INTEGRATION.md |
-| **API testing guide** | https://github.com/YudahTech/Revyu-backend/blob/master/docs/API-TESTING-GUIDE.md |
-| **Screen → endpoint map** | https://github.com/YudahTech/Revyu-backend/blob/master/docs/DESIGN-BACKEND-MAPPING.md |
-| **Backend repo** | https://github.com/YudahTech/Revyu-backend |
+| **This guide (GitHub)** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/FRONTEND-INTEGRATION.md |
+| **API testing guide** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/API-TESTING-GUIDE.md |
+| **Screen → endpoint map** | https://github.com/YudahTech/TalkGround-backend/blob/master/docs/DESIGN-BACKEND-MAPPING.md |
+| **Backend repo** | https://github.com/YudahTech/TalkGround-backend |
 
 ```env
 NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
@@ -183,7 +183,7 @@ Auth works with a Bearer token **or** HttpOnly cookies — see [API-CHANGELOG-v1
 
 | Field | Meaning |
 |-------|---------|
-| `claimed: true` | Revyu verified the business offline; show Claimed badge |
+| `claimed: true` | TalkGround verified the business offline; show Claimed badge |
 | `claimed: false` | Unclaimed listing |
 
 **How it becomes true:** only an admin updates the brand. There is **no** public “Claim my business” button wired to the API in v1. Do not invent a claim form that hits a non-existent endpoint.

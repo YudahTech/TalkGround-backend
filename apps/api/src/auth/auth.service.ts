@@ -41,7 +41,7 @@ const RESET_TTL_MS = 30 * 60 * 1000;
 const MAX_FAILED_LOGINS = 10;
 const LOCKOUT_MS = 15 * 60 * 1000;
 /** Compared against when the email doesn't exist, so response time doesn't reveal registered emails. */
-const DUMMY_HASH = bcrypt.hashSync('revyu-timing-equaliser', BCRYPT_COST);
+const DUMMY_HASH = bcrypt.hashSync('talkground-timing-equaliser', BCRYPT_COST);
 
 export interface Session {
   accessToken: string;

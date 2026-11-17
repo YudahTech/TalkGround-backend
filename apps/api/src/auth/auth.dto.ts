@@ -114,7 +114,7 @@ export class ChangePasswordDto {
 export class RefreshDto {
   @ApiPropertyOptional({
     description:
-      'Refresh token from login/register/refresh. Optional when the HttpOnly revyu_rt cookie is sent.',
+      'Refresh token from login/register/refresh. Optional when the HttpOnly talkground_rt cookie is sent.',
   })
   @IsOptional()
   @IsString()

@@ -1,6 +1,6 @@
-# Revyu — Documentation Index
+# TalkGround — Documentation Index
 
-**Project:** Revyu  
+**Project:** TalkGround  
 **Location:** `c:\Users\USER\Desktop\revyu`  
 **Last updated:** July 2026
 
@@ -82,7 +82,7 @@
 
 | # | Document | Description |
 |---|---|---|
-| 20 | [COURSE-NESTJS-POSTGRES-PRISMA-DOCKER.md](./COURSE-NESTJS-POSTGRES-PRISMA-DOCKER.md) | Full refresher course mapped to Revyu codebase |
+| 20 | [COURSE-NESTJS-POSTGRES-PRISMA-DOCKER.md](./COURSE-NESTJS-POSTGRES-PRISMA-DOCKER.md) | Full refresher course mapped to TalkGround codebase |
 
 ---
 
