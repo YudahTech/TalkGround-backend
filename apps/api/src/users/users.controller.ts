@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiBody,
@@ -9,7 +9,7 @@ import {
 import { UsersService } from './users.service';
 import { Public } from '../common/decorators';
 import { CurrentUser } from '../common/current-user.decorator';
-import { UpdateProfileDto } from './users.dto';
+import { DeleteAccountDto, UpdateProfileDto } from './users.dto';
 import { SWAGGER_BEARER_AUTH } from '../common/swagger';
 
 /**
@@ -68,6 +68,29 @@ export class UsersController {
   @Get('me/reviews')
   getMyReviews(@CurrentUser() user: { id: string }) {
     return this.users.getMyReviews(user.id);
+  }
+
+  @ApiTags('Users — Me (JWT)')
+  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiOperation({
+    summary: 'GET /users/me/export — Download all my data (NDPA)',
+  })
+  @Get('me/export')
+  exportMe(@CurrentUser() user: { id: string }) {
+    return this.users.exportMe(user.id);
+  }
+
+  @ApiTags('Users — Me (JWT)')
+  @ApiBearerAuth(SWAGGER_BEARER_AUTH)
+  @ApiOperation({
+    summary: 'DELETE /users/me — Delete my account (NDPA)',
+    description:
+      'Requires { password }. Wipes personal data, removes my reviews from public view and signs out all sessions. Irreversible.',
+  })
+  @ApiBody({ type: DeleteAccountDto })
+  @Delete('me')
+  deleteMe(@CurrentUser() user: { id: string }, @Body() dto: DeleteAccountDto) {
+    return this.users.deleteMe(user.id, dto.password);
   }
 
   @Public()

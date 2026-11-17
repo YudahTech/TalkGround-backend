@@ -16,8 +16,21 @@ services:
         value: "20"
       - key: JWT_EXPIRES_IN
         value: "7d"
+      # Testing only: returns SMS codes in API responses. Set "false" once TERMII_API_KEY is configured.
       - key: OTP_DEV_MODE
         value: "true"
+      - key: REFRESH_TOKEN_TTL_DAYS
+        value: "30"
+      - key: EMAIL_FROM_NAME
+        value: "Revyu"
+      - key: BREVO_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+      - key: TERMII_API_KEY
+        sync: false
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET

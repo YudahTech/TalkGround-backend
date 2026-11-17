@@ -6,8 +6,10 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BrandStatus,
   FlagType,
   MediaType,
+  ReportStatus,
   ReviewStatus,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
@@ -18,22 +20,65 @@ import {
   UpdateReviewDto,
 } from '../brands/brands.dto';
 import { hashIp, hashReviewText, formatRelativeDate } from '../common/utils';
+import { envFlag } from '../common/security';
 import { ConfigService } from '@nestjs/config';
+import { UploadsService } from '../uploads/uploads.service';
+
+/** Statuses visible to the public (and counted in ratings). */
+export const PUBLIC_STATUSES: ReviewStatus[] = [
+  ReviewStatus.PUBLISHED,
+  ReviewStatus.PENDING_VERIFICATION,
+];
+
+/** Distinct open reports that hide a review until a moderator decides (PRD §8.4). */
+const REPORT_HIDE_THRESHOLD = 3;
+
+type ReviewContent = {
+  id: string;
+  rating: number;
+  title: string;
+  body: string;
+  pros: string | null;
+  cons: string | null;
+  recommend: boolean;
+};
 
 @Injectable()
 export class ReviewsService {
   constructor(
     private prisma: PrismaService,
     private config: ConfigService,
+    private uploads: UploadsService,
   ) {}
 
-  // Phone/email verification gate disabled for early launch.
-  // Re-enable when Termii/Resend are live — require both verified before create.
-  // private ensureCanReview(user: { emailVerified: boolean; phoneVerified: boolean }) {
-  //   if (!user.emailVerified || !user.phoneVerified) {
-  //     throw new ForbiddenException('Verify email and phone before writing reviews');
-  //   }
-  // }
+  /**
+   * Anti-fraud gate (PRD §6.1 / R-2). Each requirement can be relaxed by env for a staged
+   * rollout: REVIEW_REQUIRE_EMAIL_VERIFIED / REVIEW_REQUIRE_PHONE_VERIFIED (default true).
+   */
+  private async ensureCanReview(userId: string) {
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { emailVerified: true, phoneVerified: true },
+    });
+    const missing: string[] = [];
+    if (
+      envFlag(this.config.get('REVIEW_REQUIRE_EMAIL_VERIFIED'), true) &&
+      !user.emailVerified
+    ) {
+      missing.push('email');
+    }
+    if (
+      envFlag(this.config.get('REVIEW_REQUIRE_PHONE_VERIFIED'), true) &&
+      !user.phoneVerified
+    ) {
+      missing.push('phone');
+    }
+    if (missing.length) {
+      throw new ForbiddenException(
+        `Verify your ${missing.join(' and ')} before writing reviews`,
+      );
+    }
+  }
 
   private mapReview(
     review: {
@@ -49,6 +94,7 @@ export class ReviewsService {
       viewCount: number;
       createdAt: Date;
       updatedAt: Date;
+      editedAt?: Date | null;
       user: { displayName: string; username: string };
       media?: { id: string; type: MediaType; url: string }[];
       _count?: { helpfulVotes: number };
@@ -71,7 +117,9 @@ export class ReviewsService {
       createdAt: review.createdAt,
       relativeDate: formatRelativeDate(review.createdAt),
       updatedAt: review.updatedAt,
-      edited: review.updatedAt > review.createdAt,
+      // updatedAt also moves when views are counted, so only editedAt means "the author edited it".
+      editedAt: review.editedAt ?? null,
+      edited: !!review.editedAt,
       author: {
         displayName: review.user.displayName,
         username: review.user.username,
@@ -79,7 +127,9 @@ export class ReviewsService {
       photos: (review.media ?? [])
         .filter((m) => m.type === MediaType.PHOTO)
         .map((m) => ({ id: m.id, url: m.url })),
-      hasReceipt: (review.media ?? []).some((m) => m.type === MediaType.RECEIPT),
+      hasReceipt: (review.media ?? []).some(
+        (m) => m.type === MediaType.RECEIPT,
+      ),
     };
   }
 
@@ -101,14 +151,15 @@ export class ReviewsService {
           : sort === 'helpful'
             ? { helpfulVotes: { _count: 'desc' as const } }
             : sort === 'verified_first'
-              ? [{ verifiedVisit: 'desc' as const }, { createdAt: 'desc' as const }]
+              ? [
+                  { verifiedVisit: 'desc' as const },
+                  { createdAt: 'desc' as const },
+                ]
               : { createdAt: 'desc' as const };
 
     const where = {
       brandId: brand.id,
-      status: {
-        in: [ReviewStatus.PUBLISHED, ReviewStatus.PENDING_VERIFICATION],
-      },
+      status: { in: PUBLIC_STATUSES },
     };
 
     const skip = (page - 1) * limit;
@@ -146,23 +197,23 @@ export class ReviewsService {
     };
   }
 
-  async create(
-    user: { id: string },
-    dto: CreateReviewDto,
-    ip?: string,
-  ) {
-    // Logged-in users can review (OTP verification deferred until Termii is live)
+  async create(user: { id: string }, dto: CreateReviewDto, ip?: string) {
+    await this.ensureCanReview(user.id);
 
     const brand = await this.prisma.brand.findUnique({
       where: { id: dto.brandId },
     });
-    if (!brand) throw new NotFoundException('Brand not found');
+    if (!brand || brand.status !== BrandStatus.ACTIVE) {
+      throw new NotFoundException('Brand not found');
+    }
 
     const existing = await this.prisma.review.findUnique({
       where: { brandId_userId: { brandId: dto.brandId, userId: user.id } },
     });
     if (existing && existing.status !== ReviewStatus.REMOVED) {
-      throw new ConflictException('You already reviewed this brand');
+      throw new ConflictException(
+        'You already reviewed this brand. Edit your existing review instead.',
+      );
     }
 
     const recentCount = await this.prisma.review.count({
@@ -179,50 +230,136 @@ export class ReviewsService {
     const ipHash = ip ? hashIp(ip, salt) : null;
     const textHash = hashReviewText(dto.body);
 
-    const review = await this.prisma.review.create({
-      data: {
-        brandId: dto.brandId,
-        userId: user.id,
-        rating: dto.rating,
-        title: dto.title,
-        body: dto.body,
-        pros: dto.pros,
-        cons: dto.cons,
-        recommend: dto.recommend,
-        ipHash,
-        textHash,
-        status: ReviewStatus.PUBLISHED,
-      },
+    const content = {
+      rating: dto.rating,
+      title: dto.title,
+      body: dto.body,
+      pros: dto.pros ?? null,
+      cons: dto.cons ?? null,
+      recommend: dto.recommend,
+      ipHash,
+      textHash,
+      status: ReviewStatus.PUBLISHED,
+    };
+
+    // One row per user+brand (unique constraint). A previously removed review is replaced —
+    // its old text is kept as a revision for moderators — instead of failing with a 500.
+    const review = existing
+      ? await this.prisma.$transaction(async (tx) => {
+          await tx.reviewRevision.create({ data: this.snapshot(existing) });
+          await tx.reviewMedia.deleteMany({ where: { reviewId: existing.id } });
+          return tx.review.update({
+            where: { id: existing.id },
+            data: {
+              ...content,
+              verifiedVisit: false,
+              editedAt: null,
+              createdAt: new Date(),
+            },
+          });
+        })
+      : await this.prisma.review.create({
+          data: { ...content, brandId: dto.brandId, userId: user.id },
+        });
+
+    await this.runTrustChecks(
+      review.id,
+      user.id,
+      dto.brandId,
+      ipHash,
+      textHash,
+      dto.rating,
+      false,
+    );
+
+    return this.getMapped(review.id);
+  }
+
+  private snapshot(review: ReviewContent) {
+    return {
+      reviewId: review.id,
+      rating: review.rating,
+      title: review.title,
+      body: review.body,
+      pros: review.pros,
+      cons: review.cons,
+      recommend: review.recommend,
+    };
+  }
+
+  private async getMapped(id: string) {
+    const review = await this.prisma.review.findUniqueOrThrow({
+      where: { id },
       include: {
         user: { select: { displayName: true, username: true } },
         media: true,
         _count: { select: { helpfulVotes: true } },
       },
     });
-
-    await this.runTrustChecks(review.id, user.id, dto.brandId, ipHash, textHash, dto.rating);
-
-    return { data: this.mapReview({ ...review, viewCount: review.viewCount }) };
+    return { data: this.mapReview(review) };
   }
 
-  async update(user: { id: string }, id: string, dto: UpdateReviewDto) {
+  async update(
+    user: { id: string },
+    id: string,
+    dto: UpdateReviewDto,
+    ip?: string,
+  ) {
     const review = await this.prisma.review.findUnique({ where: { id } });
     if (!review) throw new NotFoundException('Review not found');
     if (review.userId !== user.id) throw new ForbiddenException();
+    if (
+      review.status === ReviewStatus.REMOVED ||
+      review.status === ReviewStatus.SUSPENDED
+    ) {
+      throw new ForbiddenException(
+        'This review was removed and can no longer be edited',
+      );
+    }
 
-    const updated = await this.prisma.review.update({
-      where: { id },
-      data: {
-        ...dto,
-        textHash: dto.body ? hashReviewText(dto.body) : undefined,
-      },
-      include: {
-        user: { select: { displayName: true, username: true } },
-        media: true,
-      },
+    const changed = (Object.keys(dto) as (keyof UpdateReviewDto)[]).some(
+      (key) => dto[key] !== undefined && dto[key] !== review[key],
+    );
+    if (!changed) return this.getMapped(id);
+
+    const textHash = dto.body ? hashReviewText(dto.body) : review.textHash;
+    const salt = this.config.get('JWT_SECRET', 'dev-secret');
+
+    // Edit history (PRD R-6): keep the previous version before overwriting.
+    await this.prisma.$transaction([
+      this.prisma.reviewRevision.create({ data: this.snapshot(review) }),
+      this.prisma.review.update({
+        where: { id },
+        data: {
+          ...dto,
+          textHash,
+          editedAt: new Date(),
+          ipHash: ip ? hashIp(ip, salt) : review.ipHash,
+        },
+      }),
+    ]);
+
+    // Edits go through the same trust checks as new reviews (PRD R-7).
+    await this.runTrustChecks(
+      id,
+      user.id,
+      review.brandId,
+      null,
+      textHash ?? '',
+      dto.rating ?? review.rating,
+      true,
+    );
+
+    return this.getMapped(id);
+  }
+
+  /** Moderators: every prior version of a review, newest first. */
+  async revisions(id: string) {
+    const rows = await this.prisma.reviewRevision.findMany({
+      where: { reviewId: id },
+      orderBy: { createdAt: 'desc' },
     });
-
-    return { data: this.mapReview(updated) };
+    return { data: rows };
   }
 
   async remove(user: { id: string }, id: string) {
@@ -242,9 +379,18 @@ export class ReviewsService {
     const review = await this.prisma.review.findUnique({ where: { id } });
     if (!review) throw new NotFoundException('Review not found');
     if (review.userId !== user.id) throw new ForbiddenException();
+    if (
+      review.status === ReviewStatus.REMOVED ||
+      review.status === ReviewStatus.SUSPENDED
+    ) {
+      throw new ForbiddenException('This review was removed');
+    }
 
-    const type =
-      dto.type === 'receipt' ? MediaType.RECEIPT : MediaType.PHOTO;
+    const type = dto.type === 'receipt' ? MediaType.RECEIPT : MediaType.PHOTO;
+    const asset = await this.uploads.verifyAsset(
+      dto.url,
+      type === MediaType.RECEIPT ? 'receipts' : 'reviews',
+    );
 
     if (type === MediaType.PHOTO) {
       const photoCount = await this.prisma.reviewMedia.count({
@@ -262,22 +408,43 @@ export class ReviewsService {
       if (existing) {
         throw new ConflictException('Receipt already uploaded');
       }
-      await this.prisma.review.update({
-        where: { id },
-        data: { status: ReviewStatus.PENDING_VERIFICATION },
-      });
+      // Only a public review moves to "receipt submitted". A FLAGGED review must stay hidden.
+      if (review.status === ReviewStatus.PUBLISHED) {
+        await this.prisma.review.update({
+          where: { id },
+          data: { status: ReviewStatus.PENDING_VERIFICATION },
+        });
+      }
     }
 
     const media = await this.prisma.reviewMedia.create({
-      data: { reviewId: id, type, url: dto.url },
+      data: { reviewId: id, type, url: asset.url },
     });
 
-    return { data: media };
+    // Never echo a private receipt URL back; the client only needs to know it was accepted.
+    return {
+      data:
+        type === MediaType.RECEIPT
+          ? { id: media.id, type: media.type, createdAt: media.createdAt }
+          : media,
+    };
   }
 
   async report(user: { id: string }, id: string, dto: ReportReviewDto) {
     const review = await this.prisma.review.findUnique({ where: { id } });
-    if (!review) throw new NotFoundException('Review not found');
+    if (!review || !PUBLIC_STATUSES.includes(review.status)) {
+      throw new NotFoundException('Review not found');
+    }
+    if (review.userId === user.id) {
+      throw new BadRequestException('You cannot report your own review');
+    }
+
+    const alreadyOpen = await this.prisma.reviewReport.findFirst({
+      where: { reviewId: id, reporterId: user.id, status: ReportStatus.OPEN },
+    });
+    if (alreadyOpen) {
+      throw new ConflictException('You already reported this review');
+    }
 
     const report = await this.prisma.reviewReport.create({
       data: {
@@ -288,31 +455,70 @@ export class ReviewsService {
       },
     });
 
+    const reporters = await this.prisma.reviewReport.findMany({
+      where: { reviewId: id, status: ReportStatus.OPEN },
+      distinct: ['reporterId'],
+      select: { reporterId: true },
+    });
+    if (reporters.length >= REPORT_HIDE_THRESHOLD) {
+      await this.prisma.$transaction([
+        this.prisma.review.update({
+          where: { id },
+          data: { status: ReviewStatus.FLAGGED },
+        }),
+        this.prisma.reviewFlag.create({
+          data: {
+            reviewId: id,
+            type: FlagType.REPORT_THRESHOLD,
+            metadata: { reporters: reporters.length },
+          },
+        }),
+      ]);
+    }
+
     return { data: report };
   }
 
   async toggleHelpful(userId: string, reviewId: string) {
-    const review = await this.prisma.review.findUnique({ where: { id: reviewId } });
-    if (!review) throw new NotFoundException('Review not found');
+    const review = await this.prisma.review.findUnique({
+      where: { id: reviewId },
+    });
+    if (!review || !PUBLIC_STATUSES.includes(review.status)) {
+      throw new NotFoundException('Review not found');
+    }
+    if (review.userId === userId) {
+      throw new BadRequestException('You cannot vote on your own review');
+    }
 
     const existing = await this.prisma.reviewHelpfulVote.findUnique({
       where: { reviewId_userId: { reviewId, userId } },
     });
 
     if (existing) {
-      await this.prisma.reviewHelpfulVote.delete({ where: { id: existing.id } });
-      const count = await this.prisma.reviewHelpfulVote.count({ where: { reviewId } });
+      await this.prisma.reviewHelpfulVote.delete({
+        where: { id: existing.id },
+      });
+      const count = await this.prisma.reviewHelpfulVote.count({
+        where: { reviewId },
+      });
       return { data: { helpful: false, helpfulCount: count } };
     }
 
     await this.prisma.reviewHelpfulVote.create({
       data: { reviewId, userId },
     });
-    const count = await this.prisma.reviewHelpfulVote.count({ where: { reviewId } });
+    const count = await this.prisma.reviewHelpfulVote.count({
+      where: { reviewId },
+    });
     return { data: { helpful: true, helpfulCount: count } };
   }
 
   async recordView(reviewId: string) {
+    const visible = await this.prisma.review.count({
+      where: { id: reviewId, status: { in: PUBLIC_STATUSES } },
+    });
+    if (!visible) throw new NotFoundException('Review not found');
+
     const review = await this.prisma.review.update({
       where: { id: reviewId },
       data: { viewCount: { increment: 1 } },
@@ -328,6 +534,7 @@ export class ReviewsService {
     ipHash: string | null,
     textHash: string,
     rating: number,
+    isEdit: boolean,
   ) {
     const flags: { type: FlagType; metadata?: object }[] = [];
 
@@ -344,24 +551,31 @@ export class ReviewsService {
       }
     }
 
-    const dupes = await this.prisma.review.count({
-      where: {
-        textHash,
-        id: { not: reviewId },
-      },
-    });
-    if (dupes > 0) {
-      flags.push({ type: FlagType.DUPLICATE_TEXT, metadata: { count: dupes } });
+    if (textHash) {
+      const dupes = await this.prisma.review.count({
+        where: {
+          textHash,
+          id: { not: reviewId },
+        },
+      });
+      if (dupes > 0) {
+        flags.push({
+          type: FlagType.DUPLICATE_TEXT,
+          metadata: { count: dupes },
+        });
+      }
     }
 
-    const velocity = await this.prisma.review.count({
-      where: {
-        brandId,
-        createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
-      },
-    });
-    if (velocity > 5) {
-      flags.push({ type: FlagType.VELOCITY, metadata: { count: velocity } });
+    if (!isEdit) {
+      const velocity = await this.prisma.review.count({
+        where: {
+          brandId,
+          createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+        },
+      });
+      if (velocity > 5) {
+        flags.push({ type: FlagType.VELOCITY, metadata: { count: velocity } });
+      }
     }
 
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -371,6 +585,21 @@ export class ReviewsService {
       user.createdAt > new Date(Date.now() - 24 * 60 * 60 * 1000)
     ) {
       flags.push({ type: FlagType.NEW_ACCOUNT_LOW_RATING });
+    }
+
+    if (isEdit && flags.length) {
+      // Don't stack duplicate flags of a type the review already carries.
+      const existing = new Set(
+        (
+          await this.prisma.reviewFlag.findMany({
+            where: { reviewId },
+            select: { type: true },
+          })
+        ).map((f) => f.type),
+      );
+      for (let i = flags.length - 1; i >= 0; i--) {
+        if (existing.has(flags[i].type)) flags.splice(i, 1);
+      }
     }
 
     if (flags.length) {

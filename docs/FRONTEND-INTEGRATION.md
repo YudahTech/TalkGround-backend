@@ -2,8 +2,12 @@
 
 **Audience:** Frontend developers (separate repo)  
 **Backend owner:** API team  
-**Last updated:** July 2026  
+**Last updated:** 17 November 2026 (API v1.1)  
 **Deploy target:** Render (see [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md))
+
+> **API v1.1 (Nov 2026):** review posting now requires verified email + phone, uploads must post the
+> signed `params`, and refresh tokens rotate. Read **[API-CHANGELOG-v1.1.md](./API-CHANGELOG-v1.1.md)**
+> first — it lists every change and the screens to add.
 
 ---
 
@@ -167,9 +171,11 @@ Paginated:
 |-----|--------|
 | Guest | Home, explore, brand detail, read reviews, public profile, register/login |
 | USER (JWT) | Write/edit/delete own reviews, helpful, report, dashboard, profile, suggest brand |
-| ADMIN | Everything USER + all `/admin/*` including **setting `claimed`** |
+| MODERATOR | Everything USER + admin dashboard, review queues/moderation, suggestions, edit brand |
+| ADMIN | Everything MODERATOR + create/deactivate brands, users, suspend, roles, audit log (incl. **setting `claimed`**) |
 
-Phone/email OTP is **not** required to write reviews in v1. OTP endpoints exist for later Termii.
+**v1.1:** writing a review requires `emailVerified` **and** `phoneVerified` (API returns `403` otherwise).
+Auth works with a Bearer token **or** HttpOnly cookies — see [API-CHANGELOG-v1.1.md](./API-CHANGELOG-v1.1.md).
 
 ---
 
@@ -272,7 +278,10 @@ Base path: `/api/v1` (omit in tables below).
 |--------|------|------|-----|------|
 | `POST` | `/uploads/signature` | JWT | Secure direct-to-Cloudinary | Returns signed params; browser uploads file; API never holds the binary |
 
-Body: `{ "folder": "reviews" | "receipts" | "brands" }`
+Body: `{ "folder": "reviews" | "receipts" | "brands" | "avatars" }`
+
+**v1.1:** post every key in `data.params` with the file (it now includes `allowed_formats`, and
+`type=authenticated` for private receipts). See [API-CHANGELOG-v1.1.md §3](./API-CHANGELOG-v1.1.md#3-uploads-cloudinary).
 
 Without Cloudinary env → **503**. Text-only reviews still work.
 

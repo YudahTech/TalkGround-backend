@@ -11,7 +11,9 @@ import {
   IsUrl,
   Max,
   Min,
+  MaxLength,
   MinLength,
+  IsUUID,
 } from 'class-validator';
 import { BrandCategory, City, ReportReason } from '@prisma/client';
 
@@ -231,7 +233,7 @@ export class CreateReviewDto {
     example: '546622e9-8b36-4a21-90cb-4262418f0698',
     description: 'Brand UUID from GET /brands/:slug → data.id',
   })
-  @IsString()
+  @IsUUID()
   brandId: string;
 
   @ApiProperty({ example: 5, minimum: 1, maximum: 5 })
@@ -240,28 +242,33 @@ export class CreateReviewDto {
   @Max(5)
   rating: number;
 
-  @ApiProperty({ example: 'Best pepper soup in VI', minLength: 3 })
+  @ApiProperty({ example: 'Best pepper soup in VI', minLength: 3, maxLength: 120 })
   @IsString()
   @MinLength(3)
+  @MaxLength(120)
   title: string;
 
   @ApiProperty({
     example:
       'Visited on a Friday evening with colleagues. The pepper soup was rich and spicy, jollof portion was generous, and service was warm.',
     minLength: 50,
+    maxLength: 5000,
   })
   @IsString()
   @MinLength(50)
+  @MaxLength(5000)
   body: string;
 
   @ApiPropertyOptional({ example: 'Fast service, great jollof' })
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   pros?: string;
 
   @ApiPropertyOptional({ example: 'Can get crowded on weekends' })
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   cons?: string;
 
   @ApiProperty({ example: true })
@@ -277,25 +284,30 @@ export class UpdateReviewDto {
   @Max(5)
   rating?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ minLength: 3, maxLength: 120 })
   @IsOptional()
   @IsString()
+  @MinLength(3)
+  @MaxLength(120)
   title?: string;
 
-  @ApiPropertyOptional({ minLength: 50 })
+  @ApiPropertyOptional({ minLength: 50, maxLength: 5000 })
   @IsOptional()
   @IsString()
   @MinLength(50)
+  @MaxLength(5000)
   body?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   pros?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   cons?: string;
 
   @ApiPropertyOptional()
@@ -315,18 +327,22 @@ export class ReportReviewDto {
   @ApiPropertyOptional({ example: 'Looks like a fake review' })
   @IsOptional()
   @IsString()
+  @MaxLength(1000)
   note?: string;
 }
 
 export class AddMediaDto {
   @ApiProperty({
-    example: 'https://res.cloudinary.com/demo/image/upload/sample.jpg',
+    example: 'https://res.cloudinary.com/<cloud>/image/upload/v1/revyu/reviews/abc.jpg',
+    description:
+      'secure_url returned by Cloudinary. Must be in this account under revyu/reviews (photo) or revyu/receipts with type=authenticated (receipt).',
   })
   @IsString()
+  @MaxLength(500)
   url: string;
 
   @ApiProperty({ enum: ['photo', 'receipt'], example: 'photo' })
-  @IsString()
+  @IsIn(['photo', 'receipt'])
   type: 'photo' | 'receipt';
 }
 

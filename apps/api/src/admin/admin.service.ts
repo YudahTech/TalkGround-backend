@@ -1,21 +1,47 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import {
   BrandStatus,
+  MediaType,
+  Prisma,
   ReportStatus,
   ReviewStatus,
   SuggestionStatus,
+  UserRole,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateBrandDto, UpdateBrandDto } from '../brands/brands.dto';
 import { slugify } from '../common/utils';
+import { AuditActor, AuditService } from '../audit/audit.service';
+import { AuthService } from '../auth/auth.service';
+import { UploadsService } from '../uploads/uploads.service';
+
+const SAFE_USER_SELECT = {
+  id: true,
+  email: true,
+  username: true,
+  displayName: true,
+  role: true,
+  emailVerified: true,
+  phoneVerified: true,
+  suspended: true,
+  suspendedReason: true,
+  deletedAt: true,
+  createdAt: true,
+} satisfies Prisma.UserSelect;
 
 @Injectable()
 export class AdminService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private audit: AuditService,
+    private auth: AuthService,
+    private uploads: UploadsService,
+  ) {}
 
   async dashboard() {
     const [
@@ -31,7 +57,7 @@ export class AdminService {
       this.prisma.review.count({
         where: { status: { not: ReviewStatus.REMOVED } },
       }),
-      this.prisma.user.count(),
+      this.prisma.user.count({ where: { deletedAt: null } }),
       this.prisma.brandSuggestion.count({
         where: { status: SuggestionStatus.PENDING },
       }),
@@ -55,6 +81,8 @@ export class AdminService {
     };
   }
 
+  // ------------------------------------------------------------------ brands
+
   async listBrands() {
     const brands = await this.prisma.brand.findMany({
       orderBy: { createdAt: 'desc' },
@@ -62,34 +90,82 @@ export class AdminService {
     return { data: brands };
   }
 
-  async createBrand(dto: CreateBrandDto) {
+  private async uniqueSlug(name: string, preferred?: string): Promise<string> {
+    const base = slugify(preferred || name) || 'brand';
+    let slug = base;
+    for (
+      let i = 2;
+      await this.prisma.brand.findUnique({ where: { slug } });
+      i++
+    ) {
+      slug = `${base}-${i}`;
+    }
+    return slug;
+  }
+
+  async createBrand(actor: AuditActor, dto: CreateBrandDto) {
+    const existing = await this.prisma.brand.findUnique({
+      where: { slug: dto.slug },
+    });
+    if (existing)
+      throw new ConflictException(`Slug "${dto.slug}" is already used`);
     const brand = await this.prisma.brand.create({ data: dto });
-    return { data: brand };
-  }
-
-  async updateBrand(id: string, dto: UpdateBrandDto) {
-    const existing = await this.prisma.brand.findUnique({ where: { id } });
-    if (!existing) throw new NotFoundException('Brand not found');
-    const brand = await this.prisma.brand.update({ where: { id }, data: dto });
-    return { data: brand };
-  }
-
-  async deactivateBrand(id: string) {
-    const brand = await this.prisma.brand.update({
-      where: { id },
-      data: { status: BrandStatus.INACTIVE },
+    await this.audit.record(actor, {
+      action: 'brand.create',
+      targetType: 'brand',
+      targetId: brand.id,
+      metadata: { name: brand.name, slug: brand.slug },
     });
     return { data: brand };
   }
 
+  async updateBrand(actor: AuditActor, id: string, dto: UpdateBrandDto) {
+    const existing = await this.prisma.brand.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Brand not found');
+    const brand = await this.prisma.brand.update({ where: { id }, data: dto });
+
+    const changes = Object.fromEntries(
+      Object.entries(dto)
+        .filter(
+          ([key, value]) =>
+            value !== undefined &&
+            value !== (existing as Record<string, unknown>)[key],
+        )
+        .map(([key, value]) => [
+          key,
+          { from: (existing as Record<string, unknown>)[key], to: value },
+        ]),
+    );
+    await this.audit.record(actor, {
+      action: 'brand.update',
+      targetType: 'brand',
+      targetId: id,
+      metadata: changes,
+    });
+    return { data: brand };
+  }
+
+  async deactivateBrand(actor: AuditActor, id: string) {
+    const existing = await this.prisma.brand.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException('Brand not found');
+    const brand = await this.prisma.brand.update({
+      where: { id },
+      data: { status: BrandStatus.INACTIVE },
+    });
+    await this.audit.record(actor, {
+      action: 'brand.deactivate',
+      targetType: 'brand',
+      targetId: id,
+    });
+    return { data: brand };
+  }
+
+  // ----------------------------------------------------------------- reviews
+
   async reviewQueue(queue: string) {
-    let where = {};
+    let where: Prisma.ReviewWhereInput = {};
     if (queue === 'reported') {
-      const reportedIds = await this.prisma.reviewReport.findMany({
-        where: { status: ReportStatus.OPEN },
-        select: { reviewId: true },
-      });
-      where = { id: { in: reportedIds.map((r) => r.reviewId) } };
+      where = { reports: { some: { status: ReportStatus.OPEN } } };
     } else if (queue === 'flagged') {
       where = { status: ReviewStatus.FLAGGED };
     } else if (queue === 'pending_receipt') {
@@ -101,19 +177,53 @@ export class AdminService {
     const reviews = await this.prisma.review.findMany({
       where,
       include: {
-        user: { select: { displayName: true, username: true, email: true } },
+        user: {
+          select: {
+            displayName: true,
+            username: true,
+            email: true,
+            createdAt: true,
+          },
+        },
         brand: { select: { name: true, slug: true } },
         flags: true,
         reports: { where: { status: ReportStatus.OPEN } },
         media: true,
+        _count: { select: { revisions: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' }, // oldest first: work the SLA queue in order
     });
 
-    return { data: reviews };
+    // Receipts are private: moderators get a signed view URL, never the raw stored URL.
+    return {
+      data: reviews.map((r) => ({
+        ...r,
+        ipHash: undefined,
+        textHash: undefined,
+        media: r.media.map((m) =>
+          m.type === MediaType.RECEIPT
+            ? { ...m, url: this.uploads.privateViewUrl(m.url) }
+            : m,
+        ),
+      })),
+    };
+  }
+
+  async reviewRevisions(id: string) {
+    const review = await this.prisma.review.findUnique({
+      where: { id },
+      select: { id: true },
+    });
+    if (!review) throw new NotFoundException('Review not found');
+    const revisions = await this.prisma.reviewRevision.findMany({
+      where: { reviewId: id },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { data: revisions };
   }
 
   async moderateReview(
+    actor: AuditActor,
     id: string,
     action: string,
     note?: string,
@@ -122,46 +232,91 @@ export class AdminService {
     const review = await this.prisma.review.findUnique({ where: { id } });
     if (!review) throw new NotFoundException('Review not found');
 
-    if (action === 'approve') {
-      await this.prisma.review.update({
-        where: { id },
-        data: { status: ReviewStatus.PUBLISHED },
-      });
-    } else if (action === 'suspend') {
-      await this.prisma.review.update({
-        where: { id },
-        data: { status: ReviewStatus.SUSPENDED },
-      });
-    } else if (action === 'remove') {
-      await this.prisma.review.update({
-        where: { id },
-        data: { status: ReviewStatus.REMOVED },
-      });
-    } else if (action === 'dismiss_report') {
-      await this.prisma.reviewReport.updateMany({
+    const closeReports = (status: ReportStatus) =>
+      this.prisma.reviewReport.updateMany({
         where: { reviewId: id, status: ReportStatus.OPEN },
-        data: { status: ReportStatus.DISMISSED },
+        data: { status },
       });
+
+    if (action === 'approve') {
+      await this.prisma.$transaction([
+        this.prisma.review.update({
+          where: { id },
+          data: { status: ReviewStatus.PUBLISHED },
+        }),
+        closeReports(ReportStatus.DISMISSED),
+      ]);
+    } else if (action === 'suspend') {
+      await this.prisma.$transaction([
+        this.prisma.review.update({
+          where: { id },
+          data: { status: ReviewStatus.SUSPENDED },
+        }),
+        closeReports(ReportStatus.ACTIONED),
+      ]);
+    } else if (action === 'remove') {
+      await this.prisma.$transaction([
+        this.prisma.review.update({
+          where: { id },
+          data: { status: ReviewStatus.REMOVED },
+        }),
+        closeReports(ReportStatus.ACTIONED),
+      ]);
+    } else if (action === 'dismiss_report') {
+      await closeReports(ReportStatus.DISMISSED);
     } else if (action === 'verify_receipt') {
       if (approved === undefined) {
         throw new BadRequestException('approved field required');
       }
+      const hasReceipt = await this.prisma.reviewMedia.count({
+        where: { reviewId: id, type: MediaType.RECEIPT },
+      });
+      if (!hasReceipt)
+        throw new BadRequestException('This review has no receipt');
       await this.prisma.review.update({
         where: { id },
-        data: {
-          verifiedVisit: approved,
-          status: ReviewStatus.PUBLISHED,
-        },
+        data: { verifiedVisit: approved, status: ReviewStatus.PUBLISHED },
       });
     } else {
       throw new BadRequestException('Unknown action');
     }
 
-    if (note) {
-      console.log(`[MODERATION] review=${id} action=${action} note=${note}`);
-    }
+    await this.audit.record(actor, {
+      action: `review.${action}`,
+      targetType: 'review',
+      targetId: id,
+      metadata: { previousStatus: review.status, note, approved },
+    });
 
     return { data: { message: `Action ${action} applied` } };
+  }
+
+  // ------------------------------------------------------------- suggestions
+
+  /** Active brands in the same city whose name overlaps the suggestion (PRD L-3). */
+  private async possibleDuplicates(name: string, city: string) {
+    const words = name
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter(
+        (w) =>
+          w.length >= 3 &&
+          !['the', 'and', 'restaurant', 'hotel', 'lounge', 'suites'].includes(
+            w,
+          ),
+      );
+    const or: Prisma.BrandWhereInput[] = [
+      { name: { contains: name.trim(), mode: 'insensitive' } },
+      { slug: slugify(name) },
+      ...words.map((w) => ({
+        name: { contains: w, mode: 'insensitive' as const },
+      })),
+    ];
+    return this.prisma.brand.findMany({
+      where: { city: city as Prisma.BrandWhereInput['city'], OR: or },
+      select: { id: true, name: true, slug: true, area: true, status: true },
+      take: 5,
+    });
   }
 
   async listSuggestions() {
@@ -170,12 +325,19 @@ export class AdminService {
       include: {
         user: { select: { displayName: true, username: true } },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'asc' },
     });
-    return { data: suggestions };
+    const data = await Promise.all(
+      suggestions.map(async (s) => ({
+        ...s,
+        possibleDuplicates: await this.possibleDuplicates(s.name, s.city),
+      })),
+    );
+    return { data };
   }
 
   async resolveSuggestion(
+    actor: AuditActor,
     id: string,
     status: 'approved' | 'rejected',
     adminNote?: string,
@@ -184,13 +346,16 @@ export class AdminService {
       where: { id },
     });
     if (!suggestion) throw new NotFoundException('Suggestion not found');
+    if (suggestion.status !== SuggestionStatus.PENDING) {
+      throw new ConflictException('This suggestion was already resolved');
+    }
 
+    let brandId: string | undefined;
     if (status === 'approved') {
-      const slug = slugify(suggestion.name);
-      await this.prisma.brand.create({
+      const brand = await this.prisma.brand.create({
         data: {
           name: suggestion.name,
-          slug,
+          slug: await this.uniqueSlug(suggestion.name),
           category: suggestion.category,
           subType: suggestion.subType,
           city: suggestion.city,
@@ -198,6 +363,7 @@ export class AdminService {
           website: suggestion.website,
         },
       });
+      brandId = brand.id;
     }
 
     const updated = await this.prisma.brandSuggestion.update({
@@ -211,7 +377,14 @@ export class AdminService {
       },
     });
 
-    return { data: updated };
+    await this.audit.record(actor, {
+      action: `suggestion.${status}`,
+      targetType: 'suggestion',
+      targetId: id,
+      metadata: { name: suggestion.name, brandId, adminNote },
+    });
+
+    return { data: { ...updated, brandId } };
   }
 
   async suggestBrand(
@@ -236,14 +409,106 @@ export class AdminService {
         website: dto.website,
       },
     });
-    return { data: suggestion };
+    const possibleDuplicates = await this.possibleDuplicates(
+      dto.name,
+      dto.city,
+    );
+    return { data: { ...suggestion, possibleDuplicates } };
   }
 
-  async suspendUser(id: string, suspended: boolean, reason: string) {
+  // ------------------------------------------------------------------- users
+
+  async listUsers(params: { q?: string; page: number; limit: number }) {
+    const where: Prisma.UserWhereInput = params.q
+      ? {
+          OR: [
+            { email: { contains: params.q, mode: 'insensitive' } },
+            { username: { contains: params.q, mode: 'insensitive' } },
+            { displayName: { contains: params.q, mode: 'insensitive' } },
+          ],
+        }
+      : {};
+    const [total, users] = await Promise.all([
+      this.prisma.user.count({ where }),
+      this.prisma.user.findMany({
+        where,
+        select: {
+          ...SAFE_USER_SELECT,
+          _count: { select: { reviews: true, reports: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (params.page - 1) * params.limit,
+        take: params.limit,
+      }),
+    ]);
+    return {
+      data: users,
+      meta: {
+        page: params.page,
+        limit: params.limit,
+        total,
+        totalPages: Math.ceil(total / params.limit),
+      },
+    };
+  }
+
+  async suspendUser(
+    actor: AuditActor,
+    id: string,
+    suspended: boolean,
+    reason: string,
+  ) {
+    if (id === actor.id)
+      throw new BadRequestException('You cannot suspend your own account');
+    const target = await this.prisma.user.findUnique({ where: { id } });
+    if (!target) throw new NotFoundException('User not found');
+
     const user = await this.prisma.user.update({
       where: { id },
-      data: { suspended, suspendedReason: reason },
+      data: { suspended, suspendedReason: suspended ? reason : null },
+      select: SAFE_USER_SELECT,
+    });
+    if (suspended) await this.auth.revokeAllSessions(id);
+
+    await this.audit.record(actor, {
+      action: suspended ? 'user.suspend' : 'user.unsuspend',
+      targetType: 'user',
+      targetId: id,
+      metadata: { reason },
     });
     return { data: user };
+  }
+
+  async setRole(actor: AuditActor, id: string, role: UserRole) {
+    if (id === actor.id)
+      throw new BadRequestException('You cannot change your own role');
+    const target = await this.prisma.user.findUnique({ where: { id } });
+    if (!target) throw new NotFoundException('User not found');
+
+    const user = await this.prisma.user.update({
+      where: { id },
+      data: { role },
+      select: SAFE_USER_SELECT,
+    });
+    // Force fresh tokens so the new permissions apply everywhere immediately.
+    await this.auth.revokeAllSessions(id);
+
+    await this.audit.record(actor, {
+      action: 'user.role_change',
+      targetType: 'user',
+      targetId: id,
+      metadata: { from: target.role, to: role },
+    });
+    return { data: user };
+  }
+
+  listAuditLogs(params: {
+    page: number;
+    limit: number;
+    targetType?: string;
+    targetId?: string;
+    actorId?: string;
+  }) {
+    return this.audit.list(params);
   }
 }

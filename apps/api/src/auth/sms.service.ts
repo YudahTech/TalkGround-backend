@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 @Injectable()
@@ -14,14 +14,22 @@ export class SmsService {
     return `234${digits}`;
   }
 
+  /** Canonical E.164 form (+234…) so the same number can't be stored in several spellings. */
+  normalizePhone(phone: string): string {
+    const formatted = this.formatPhone(phone);
+    if (!/^234[789]\d{9}$/.test(formatted)) {
+      throw new BadRequestException('Enter a valid Nigerian mobile number, e.g. +2348012345678');
+    }
+    return `+${formatted}`;
+  }
+
   async sendOtp(phone: string, code: string): Promise<boolean> {
-    const devMode = this.config.get('OTP_DEV_MODE') === 'true';
     const apiKey = this.config.get('TERMII_API_KEY');
     const senderId = this.config.get('TERMII_SENDER_ID', 'Revyu');
 
-    if (devMode || !apiKey) {
-      this.logger.log(`[DEV OTP] phone=${phone} code=${code}`);
-      return true;
+    if (!apiKey) {
+      this.logger.warn('TERMII_API_KEY not set — SMS not sent (set OTP_DEV_MODE=true for local testing)');
+      return false;
     }
 
     const to = this.formatPhone(phone);

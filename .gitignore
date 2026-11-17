@@ -45,3 +45,8 @@ apps/api/openapi.json
 
 # Frontend lives in a separate repo — not part of Revyu-backend
 apps/web/
+
+# Database dumps must never be committed
+*.sql.gz
+/backup.sql
+backup*.sql

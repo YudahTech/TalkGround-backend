@@ -3,9 +3,12 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { SWAGGER_BEARER_AUTH } from './common/swagger';
+import { applySecurity, checkSecurityConfig } from './common/bootstrap-security';
 
 async function bootstrap() {
+  checkSecurityConfig();
   const app = await NestFactory.create(AppModule);
+  applySecurity(app);
 
   app.setGlobalPrefix('api/v1');
   app.useGlobalPipes(
@@ -15,17 +18,6 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-
-  app.enableCors({
-    origin: [
-      process.env.CORS_ORIGIN ?? 'http://localhost:3000',
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'http://127.0.0.1:3000',
-      'http://127.0.0.1:3001',
-    ],
-    credentials: true,
-  });
 
   const swaggerConfig = new DocumentBuilder()
     .setTitle('Revyu API')
@@ -42,7 +34,7 @@ async function bootstrap() {
         'Docs: `docs/FRONTEND-INTEGRATION.md`, `docs/SWAGGER-GUIDE.md`, `docs/API-TESTING-GUIDE.md`',
       ].join('\n'),
     )
-    .setVersion('1.0')
+    .setVersion('1.1')
     .addServer(
       `http://localhost:${process.env.PORT ?? 3001}`,
       'Local development',

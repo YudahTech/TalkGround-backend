@@ -16,6 +16,7 @@ import {
   toApiCategory,
   toApiCity,
 } from '../common/utils';
+import { MIN_REVIEWS_FOR_RATING } from '../common/security';
 
 const PUBLIC_REVIEW_STATUSES = [
   ReviewStatus.PUBLISHED,
@@ -136,6 +137,9 @@ export class BrandsService {
       trustLabel: trust.label,
       averageRating: stats.averageRating,
       reviewCount: stats.reviewCount,
+      // PRD §7.12: below this many public reviews, show "Not enough reviews yet" instead of the average.
+      hasEnoughReviews: stats.reviewCount >= MIN_REVIEWS_FOR_RATING,
+      minReviewsForRating: MIN_REVIEWS_FOR_RATING,
       ratingBreakdown: stats.ratingBreakdown,
       ratingDistribution: stats.ratingDistribution,
       ...extra,
@@ -192,6 +196,9 @@ export class BrandsService {
         return b.reviewCount - a.reviewCount;
       }
       if (query.sort === 'newest') return 0;
+      // Rating sorts rank only brands with enough reviews; the rest follow, by review count.
+      if (a.hasEnoughReviews !== b.hasEnoughReviews) return a.hasEnoughReviews ? -1 : 1;
+      if (!a.hasEnoughReviews) return b.reviewCount - a.reviewCount;
       return b.averageRating - a.averageRating;
     });
 

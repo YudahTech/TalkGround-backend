@@ -53,3 +53,10 @@ export class UpdateProfileDto {
   @IsEnum(ReviewInterest, { each: true })
   interests?: ReviewInterest[];
 }
+
+export class DeleteAccountDto {
+  @ApiProperty({ example: 'myCurrentPassword', description: 'Current password, to confirm' })
+  @IsString()
+  @MaxLength(72)
+  password: string;
+}

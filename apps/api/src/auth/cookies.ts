@@ -1,0 +1,55 @@
+import type { CookieOptions, Request, Response } from 'express';
+import { envFlag } from '../common/security';
+import type { Session } from './auth.service';
+
+export const ACCESS_COOKIE = 'revyu_at';
+export const REFRESH_COOKIE = 'revyu_rt';
+const REFRESH_PATH = '/api/v1/auth';
+
+/**
+ * Cookie settings.
+ * - COOKIE_SECURE   (default: true when NODE_ENV=production)
+ * - COOKIE_SAMESITE (lax | strict | none; default lax). A web app on a different site
+ *   from the API (e.g. *.vercel.app → *.onrender.com) needs `none` + Secure.
+ * - COOKIE_DOMAIN   (optional, e.g. .revyu.ng to share between app. and api.)
+ */
+function baseOptions(): CookieOptions {
+  const sameSite = (process.env.COOKIE_SAMESITE ?? 'lax').toLowerCase() as
+    | 'lax'
+    | 'strict'
+    | 'none';
+  const secure =
+    envFlag(process.env.COOKIE_SECURE, process.env.NODE_ENV === 'production') ||
+    sameSite === 'none';
+  return {
+    httpOnly: true,
+    secure,
+    sameSite,
+    domain: process.env.COOKIE_DOMAIN || undefined,
+  };
+}
+
+export function setSessionCookies(res: Response, session: Session) {
+  const opts = baseOptions();
+  res.cookie(ACCESS_COOKIE, session.accessToken, {
+    ...opts,
+    path: '/',
+    maxAge: session.expiresIn * 1000,
+  });
+  res.cookie(REFRESH_COOKIE, session.refreshToken, {
+    ...opts,
+    path: REFRESH_PATH,
+    expires: session.refreshTokenExpiresAt,
+  });
+}
+
+export function clearSessionCookies(res: Response) {
+  const opts = baseOptions();
+  res.clearCookie(ACCESS_COOKIE, { ...opts, path: '/' });
+  res.clearCookie(REFRESH_COOKIE, { ...opts, path: REFRESH_PATH });
+}
+
+export function readCookie(req: Request, name: string): string | undefined {
+  const value = (req.cookies as Record<string, string> | undefined)?.[name];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}

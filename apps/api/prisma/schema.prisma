@@ -9,7 +9,13 @@ datasource db {
 
 enum UserRole {
   USER
+  MODERATOR
   ADMIN
+}
+
+enum OtpPurpose {
+  PHONE
+  EMAIL
 }
 
 enum BrandCategory {
@@ -58,6 +64,7 @@ enum FlagType {
   DUPLICATE_TEXT
   VELOCITY
   NEW_ACCOUNT_LOW_RATING
+  REPORT_THRESHOLD
   MANUAL
 }
 
@@ -66,6 +73,8 @@ enum ReportReason {
   NEVER_VISITED
   OFFENSIVE
   PAID_INCENTIVIZED
+  PERSONAL_INFO
+  CONFLICT_OF_INTEREST
   OTHER
 }
 
@@ -109,6 +118,10 @@ model User {
   role          UserRole  @default(USER)
   suspended     Boolean   @default(false)
   suspendedReason String?
+  tokenVersion     Int       @default(0)
+  failedLoginCount Int       @default(0)
+  lockedUntil      DateTime?
+  deletedAt        DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
@@ -117,16 +130,67 @@ model User {
   brandSuggestions  BrandSuggestion[]
   otpCodes          OtpCode[]
   helpfulVotes      ReviewHelpfulVote[]
+  refreshTokens     RefreshToken[]
+  passwordResets    PasswordResetToken[]
+  auditLogs         AuditLog[]
 }
 
+/// One-time codes for phone (SMS) and email verification. `code` stores an HMAC, never the plain code.
 model OtpCode {
-  id        String   @id @default(uuid())
+  id        String     @id @default(uuid())
   userId    String
+  purpose   OtpPurpose @default(PHONE)
   code      String
+  attempts  Int        @default(0)
   expiresAt DateTime
-  used      Boolean  @default(false)
-  createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  used      Boolean    @default(false)
+  createdAt DateTime   @default(now())
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+/// Rotating refresh tokens. Only a SHA-256 hash of the token is stored.
+model RefreshToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Single-use password reset tokens. Only a SHA-256 hash of the token is stored.
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Append-only record of sensitive actions (moderation, suspensions, role changes, deletions).
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorRole  String?
+  action     String
+  targetType String
+  targetId   String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([targetType, targetId])
+  @@index([actorId])
+  @@index([createdAt])
 }
 
 model Brand {
@@ -164,6 +228,7 @@ model Review {
   viewCount      Int          @default(0)
   ipHash         String?
   textHash       String?
+  editedAt       DateTime?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
@@ -173,8 +238,25 @@ model Review {
   flags         ReviewFlag[]
   reports       ReviewReport[]
   helpfulVotes  ReviewHelpfulVote[]
+  revisions     ReviewRevision[]
 
   @@unique([brandId, userId])
+}
+
+/// Snapshot of a review's content before each edit (edit history).
+model ReviewRevision {
+  id        String   @id @default(uuid())
+  reviewId  String
+  rating    Int
+  title     String
+  body      String
+  pros      String?
+  cons      String?
+  recommend Boolean
+  createdAt DateTime @default(now())
+  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
 }
 
 model ReviewHelpfulVote {

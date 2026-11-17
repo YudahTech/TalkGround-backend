@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
 import { Reflector } from '@nestjs/core';
-import { ExtractJwt } from 'passport-jwt';
+import { extractAccessToken } from './jwt.strategy';
 import { IS_OPTIONAL_AUTH_KEY, IS_PUBLIC_KEY } from '../common/decorators';
 
 @Injectable()
@@ -28,7 +28,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
 
     if (isOptionalAuth) {
       const request = context.switchToHttp().getRequest();
-      const token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
+      const token = extractAccessToken(request);
       if (!token) return true;
     }
 

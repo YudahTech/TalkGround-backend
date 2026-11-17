@@ -3,10 +3,11 @@ import { IsIn } from 'class-validator';
 
 export class UploadSignatureDto {
   @ApiProperty({
-    enum: ['reviews', 'receipts', 'brands'],
+    enum: ['reviews', 'receipts', 'brands', 'avatars'],
     example: 'reviews',
-    description: 'Cloudinary folder group under revyu/',
+    description:
+      'Cloudinary folder under revyu/. receipts are private (type=authenticated). POST every key in data.params with the file.',
   })
-  @IsIn(['reviews', 'receipts', 'brands'])
-  folder: 'reviews' | 'receipts' | 'brands';
+  @IsIn(['reviews', 'receipts', 'brands', 'avatars'])
+  folder: 'reviews' | 'receipts' | 'brands' | 'avatars';
 }

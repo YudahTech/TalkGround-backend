@@ -50,9 +50,9 @@ export class ReviewsController {
 
   @ApiBearerAuth(SWAGGER_BEARER_AUTH)
   @ApiOperation({
-    summary: 'Create review (JWT required — any logged-in user)',
+    summary: 'Create review (JWT; verified email + phone required)',
     description:
-      'Phone/email OTP verification is not required in v1. Admin routes still require ADMIN role.',
+      'Returns 403 "Verify your email and phone…" until both are verified (configurable via REVIEW_REQUIRE_*_VERIFIED). Max 3 per 24h, one per brand.',
   })
   @ApiBody({ type: CreateReviewDto })
   @Post('reviews')
@@ -66,15 +66,16 @@ export class ReviewsController {
   }
 
   @ApiBearerAuth(SWAGGER_BEARER_AUTH)
-  @ApiOperation({ summary: 'Update own review (JWT)' })
+  @ApiOperation({ summary: 'Update own review (JWT). Previous version is kept; trust checks re-run.' })
   @ApiBody({ type: UpdateReviewDto })
   @Patch('reviews/:id')
   update(
     @CurrentUser() user: { id: string },
     @Param('id') id: string,
     @Body() dto: UpdateReviewDto,
+    @Req() req: { ip?: string; socket: { remoteAddress?: string } },
   ) {
-    return this.reviews.update(user, id, dto);
+    return this.reviews.update(user, id, dto, req.ip || req.socket.remoteAddress);
   }
 
   @ApiBearerAuth(SWAGGER_BEARER_AUTH)
