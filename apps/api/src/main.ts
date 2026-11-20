@@ -30,7 +30,7 @@ async function bootstrap() {
         'Frontend guides: `docs/FRONTEND-AUTH.md`, `docs/FRONTEND-INTEGRATION.md`',
       ].join('\n'),
     )
-    .setVersion('2.0')
+    .setVersion('2.5')
     .addServer(
       `http://localhost:${process.env.PORT ?? 3001}`,
       'Local development',
