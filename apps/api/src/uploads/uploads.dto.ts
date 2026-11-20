@@ -8,7 +8,7 @@ export class UploadSignatureDto {
     enum: UPLOAD_FOLDERS,
     example: 'evidence',
     description:
-      'evidence = public review photos; evidence-private = receipts/screenshots/documents (private); ' +
+      'evidence = public review photos; receipts = review receipts (private); ' +
       'logos = business logos; avatars = profile photos; claim-documents = ownership documents (private). ' +
       'POST every key in data.params with the file to data.uploadUrl.',
   })

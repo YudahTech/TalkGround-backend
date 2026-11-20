@@ -4,6 +4,7 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
+  IsDateString,
   IsEnum,
   IsIn,
   IsInt,
@@ -19,9 +20,9 @@ import {
 } from 'class-validator';
 import { PolicyReason } from '@prisma/client';
 import { PaginationQueryDto } from '../common/pagination';
+import { toUpperCase } from '../common/transforms';
 
-const upper = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.toUpperCase() : value;
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 // ─────────────────────────────────────────────────────────────── users & staff
 
@@ -45,7 +46,7 @@ export class SuspendUserDto {
   @IsBoolean()
   suspended: boolean;
 
-  @ApiProperty({ example: 'Posted fabricated reviews from multiple accounts' })
+  @ApiProperty({ example: 'Posted fabricated reviews from several accounts' })
   @IsString()
   @MinLength(3)
   @MaxLength(500)
@@ -57,12 +58,18 @@ export class SetStaffRoleDto {
     nullable: true,
     example: 'moderator',
     description:
-      'AdminRole key (GET /admin/roles), or null to remove staff access',
+      'moderator | admin | super_admin, or null to remove staff access',
   })
   @IsOptional()
   @IsString()
   @MaxLength(60)
   roleKey: string | null;
+
+  @ApiProperty({ example: 'Joined the moderation team' })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
 }
 
 // ────────────────────────────────────────────────────────────────── businesses
@@ -75,32 +82,57 @@ export class AdminBusinessQueryDto extends PaginationQueryDto {
   q?: string;
 
   @ApiPropertyOptional({
-    enum: ['pending_review', 'published', 'suspended', 'merged', 'archived'],
+    enum: [
+      'suggested',
+      'pending_review',
+      'published',
+      'rejected',
+      'suspended',
+      'merged',
+      'archived',
+    ],
   })
   @IsOptional()
-  @IsIn(['pending_review', 'published', 'suspended', 'merged', 'archived'])
+  @IsIn([
+    'suggested',
+    'pending_review',
+    'published',
+    'rejected',
+    'suspended',
+    'merged',
+    'archived',
+  ])
   status?: string;
 
-  @ApiPropertyOptional({
-    enum: ['unclaimed', 'claim_pending', 'claimed', 'verified'],
-  })
+  @ApiPropertyOptional({ enum: ['unclaimed', 'claim_pending', 'claimed'] })
   @IsOptional()
-  @IsIn(['unclaimed', 'claim_pending', 'claimed', 'verified'])
+  @IsIn(['unclaimed', 'claim_pending', 'claimed'])
   ownership?: string;
 
   @ApiPropertyOptional({ description: 'Category slug' })
   @IsOptional()
-  @IsString()
-  @MaxLength(60)
+  @Matches(SLUG)
   category?: string;
+
+  @ApiPropertyOptional({ description: 'City slug' })
+  @IsOptional()
+  @Matches(SLUG)
+  city?: string;
 }
 
 export class BusinessStatusDto {
   @ApiProperty({
-    enum: ['published', 'suspended', 'archived', 'pending_review'],
+    enum: ['pending_review', 'published', 'rejected', 'suspended', 'archived'],
+    description:
+      'Only PRD §7.4 transitions are allowed. Suspending / unsuspending needs business.suspend.',
   })
-  @IsIn(['published', 'suspended', 'archived', 'pending_review'])
-  status: 'published' | 'suspended' | 'archived' | 'pending_review';
+  @IsIn(['pending_review', 'published', 'rejected', 'suspended', 'archived'])
+  status:
+    | 'pending_review'
+    | 'published'
+    | 'rejected'
+    | 'suspended'
+    | 'archived';
 
   @ApiProperty({ example: 'Impersonating another vendor' })
   @IsString()
@@ -109,23 +141,12 @@ export class BusinessStatusDto {
   reason: string;
 }
 
-export class InvestigationDto {
+export class NoindexDto {
   @ApiProperty({ example: true })
   @IsBoolean()
-  underInvestigation: boolean;
+  noindex: boolean;
 
-  @ApiPropertyOptional({
-    example: 'We are reviewing an unusual pattern of reviews on this profile.',
-    description: 'Shown publicly on the profile',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(300)
-  publicNote?: string;
-
-  @ApiProperty({
-    example: 'Spike of 5-star reviews from new accounts on the same IP',
-  })
+  @ApiProperty({ example: 'Legal complaint received; under review' })
   @IsString()
   @MinLength(3)
   @MaxLength(500)
@@ -133,7 +154,7 @@ export class InvestigationDto {
 }
 
 export class MergeBusinessDto {
-  @ApiProperty({ description: 'The listing to keep (canonical)' })
+  @ApiProperty({ description: 'The listing to keep' })
   @IsUUID()
   targetId: string;
 
@@ -149,47 +170,47 @@ export class MergeBusinessDto {
 // ───────────────────────────────────────────────────────────────── moderation
 
 export const REVIEW_QUEUES = [
-  'pending_moderation',
+  'pending',
   'under_investigation',
   'reported',
   'evidence',
+  'suspended',
   'removed',
 ] as const;
 
 export class ReviewQueueQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ enum: REVIEW_QUEUES, default: 'pending_moderation' })
+  @ApiPropertyOptional({ enum: REVIEW_QUEUES, default: 'pending' })
   @IsOptional()
   @IsIn(REVIEW_QUEUES)
   queue?: (typeof REVIEW_QUEUES)[number];
 }
 
+export const REVIEW_ACTIONS = [
+  'publish',
+  'suspend',
+  'remove',
+  'restore',
+  'investigate',
+  'clear_investigation',
+] as const;
+export type ReviewAction = (typeof REVIEW_ACTIONS)[number];
+
 export class ModerateReviewDto {
   @ApiProperty({
-    enum: [
-      'publish',
-      'remove',
-      'restore',
-      'investigate',
-      'clear_investigation',
-    ],
+    enum: REVIEW_ACTIONS,
     description:
-      'publish: release a held review. remove: take down (breaks a rule). restore: undo a removal. ' +
-      'investigate: keep visible with the "Under investigation" label. clear_investigation: remove that label.',
+      'publish: release a held review. suspend: hide temporarily. remove: take down. restore: back to published. ' +
+      'investigate / clear_investigation: moderator investigation status (excluded from the rating while investigated).',
   })
-  @IsIn(['publish', 'remove', 'restore', 'investigate', 'clear_investigation'])
-  action:
-    | 'publish'
-    | 'remove'
-    | 'restore'
-    | 'investigate'
-    | 'clear_investigation';
+  @IsIn(REVIEW_ACTIONS)
+  action: ReviewAction;
 
   @ApiProperty({
     enum: PolicyReason,
     example: PolicyReason.NO_VIOLATION,
-    description: 'Policy ground (PRD §8.2)',
+    description: 'Recorded reason (PRD §8.2)',
   })
-  @Transform(upper)
+  @Transform(toUpperCase)
   @IsEnum(PolicyReason)
   reason: PolicyReason;
 
@@ -200,25 +221,59 @@ export class ModerateReviewDto {
   note?: string;
 }
 
-export class EvidenceDecisionDto {
-  @ApiProperty({
-    enum: ['accepted', 'rejected'],
-    description:
-      'accepted shows "Evidence reviewed" on the review. rejected hides the file.',
-  })
-  @IsIn(['accepted', 'rejected'])
-  decision: 'accepted' | 'rejected';
-
-  @ApiPropertyOptional({ maxLength: 500 })
+export class EditReviewContentDto {
+  @ApiPropertyOptional({ minLength: 3, maxLength: 120 })
   @IsOptional()
   @IsString()
-  @MaxLength(500)
+  @MinLength(3)
+  @MaxLength(120)
+  title?: string;
+
+  @ApiPropertyOptional({
+    maxLength: 5000,
+    description: 'e.g. remove a phone number the reviewer included',
+  })
+  @IsOptional()
+  @IsString()
+  @MinLength(1)
+  @MaxLength(5000)
+  body?: string;
+
+  @ApiProperty({
+    enum: PolicyReason,
+    example: PolicyReason.PERSONAL_INFORMATION,
+  })
+  @Transform(toUpperCase)
+  @IsEnum(PolicyReason)
+  reason: PolicyReason;
+
+  @ApiPropertyOptional({ maxLength: 1000 })
+  @IsOptional()
+  @IsString()
+  @MaxLength(1000)
   note?: string;
+}
+
+export class EvidenceStatusDto {
+  @ApiProperty({
+    enum: ['accepted', 'rejected'],
+    description: 'accepted shows "Evidence reviewed" on the review',
+  })
+  @IsIn(['accepted', 'rejected'])
+  status: 'accepted' | 'rejected';
+
+  @ApiProperty({
+    example: 'Receipt matches the date, amount and business name.',
+  })
+  @IsString()
+  @MinLength(3)
+  @MaxLength(500)
+  reason: string;
 }
 
 export class RemoveResponseDto {
   @ApiProperty({ enum: PolicyReason, example: PolicyReason.HARASSMENT })
-  @Transform(upper)
+  @Transform(toUpperCase)
   @IsEnum(PolicyReason)
   reason: PolicyReason;
 
@@ -241,15 +296,15 @@ export class ReportQueryDto extends PaginationQueryDto {
 
 export class DecideReportDto {
   @ApiProperty({
-    enum: ['dismiss', 'remove_review', 'investigate_review'],
+    enum: ['dismiss', 'suspend', 'remove', 'investigate'],
     description:
-      'dismiss closes the report with no change. The other two act on the review and close every open report on it.',
+      'dismiss closes the report with no change. suspend/remove/investigate act on the reported review (or remove the reported response) and close every open report on it.',
   })
-  @IsIn(['dismiss', 'remove_review', 'investigate_review'])
-  decision: 'dismiss' | 'remove_review' | 'investigate_review';
+  @IsIn(['dismiss', 'suspend', 'remove', 'investigate'])
+  decision: 'dismiss' | 'suspend' | 'remove' | 'investigate';
 
   @ApiProperty({ enum: PolicyReason, example: PolicyReason.NO_VIOLATION })
-  @Transform(upper)
+  @Transform(toUpperCase)
   @IsEnum(PolicyReason)
   reason: PolicyReason;
 
@@ -262,40 +317,60 @@ export class DecideReportDto {
 
 export class DisputeQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
-    enum: ['open', 'upheld', 'rejected', 'withdrawn'],
-    default: 'open',
+    enum: [
+      'open',
+      'under_review',
+      'upheld',
+      'review_actioned',
+      'closed',
+      'active',
+    ],
+    default: 'active',
   })
   @IsOptional()
-  @IsIn(['open', 'upheld', 'rejected', 'withdrawn'])
+  @IsIn([
+    'open',
+    'under_review',
+    'upheld',
+    'review_actioned',
+    'closed',
+    'active',
+  ])
   status?: string;
 }
 
 export class DecideDisputeDto {
   @ApiProperty({
-    enum: ['uphold', 'reject'],
+    enum: ['upheld', 'review_actioned', 'closed'],
     description:
-      'uphold: the review breaks a rule (choose reviewAction). reject: the review stays as is.',
+      'upheld: the review stays as it is. review_actioned: a moderator edits, suspends or removes it (reviewAction). closed: closed without a decision on the review (e.g. withdrawn).',
   })
-  @IsIn(['uphold', 'reject'])
-  decision: 'uphold' | 'reject';
+  @IsIn(['upheld', 'review_actioned', 'closed'])
+  decision: 'upheld' | 'review_actioned' | 'closed';
 
   @ApiPropertyOptional({
-    enum: ['remove', 'investigate'],
-    description: 'Required when upholding',
+    enum: ['edit', 'suspend', 'remove'],
+    description: 'Required for review_actioned',
   })
   @IsOptional()
-  @IsIn(['remove', 'investigate'])
-  reviewAction?: 'remove' | 'investigate';
+  @IsIn(['edit', 'suspend', 'remove'])
+  reviewAction?: 'edit' | 'suspend' | 'remove';
+
+  @ApiPropertyOptional({ description: 'reviewAction=edit: the corrected body' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(5000)
+  editedBody?: string;
 
   @ApiProperty({ enum: PolicyReason, example: PolicyReason.NO_VIOLATION })
-  @Transform(upper)
+  @Transform(toUpperCase)
   @IsEnum(PolicyReason)
   reason: PolicyReason;
 
   @ApiProperty({
     example:
-      'The order confirmation the reviewer provided matches the business records.',
-    description: 'Sent to both parties',
+      'The reviewer provided an order confirmation matching the experience described.',
+    description: 'Recorded and sent to both parties',
   })
   @IsString()
   @MinLength(5)
@@ -303,33 +378,45 @@ export class DecideDisputeDto {
   note: string;
 }
 
-// ─────────────────────────────────────────────────────────────────── taxonomy
+// ─────────────────────────────────────────────────────── categories & cities
 
 export class CategoryDimensionInputDto {
-  @ApiProperty({ example: 'communication' })
+  @ApiProperty({ example: 'delivery' })
   @IsString()
   @MaxLength(60)
   key: string;
 
-  @ApiProperty({ example: true })
+  @ApiProperty({ example: false })
   @IsBoolean()
   required: boolean;
 }
 
-export class UpsertCategoryDto {
-  @ApiProperty({ example: 'Hotels & Accommodation' })
+export class UpdateCategoryDto {
+  @ApiPropertyOptional({ example: 'Hotels and accommodation' })
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(80)
-  name: string;
+  name?: string;
 
-  @ApiPropertyOptional({
-    example: 'Hotels, guest houses and short-let apartments.',
-  })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   @MaxLength(300)
   description?: string;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+
+  @ApiPropertyOptional({
+    description: 'Parent category slug, or empty string to clear',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(60)
+  parentSlug?: string;
 
   @ApiPropertyOptional({ example: 7 })
   @IsOptional()
@@ -339,14 +426,9 @@ export class UpsertCategoryDto {
   @Max(1000)
   sortOrder?: number;
 
-  @ApiPropertyOptional({ example: true })
-  @IsOptional()
-  @IsBoolean()
-  isActive?: boolean;
-
   @ApiPropertyOptional({
     type: [CategoryDimensionInputDto],
-    description: 'Replaces the category dimensions, in order',
+    description: 'Replaces the dimensions, in display order',
   })
   @IsOptional()
   @IsArray()
@@ -356,41 +438,106 @@ export class UpsertCategoryDto {
   dimensions?: CategoryDimensionInputDto[];
 }
 
-export class CreateCategoryDto extends UpsertCategoryDto {
-  @ApiProperty({ example: 'hotels-accommodation' })
-  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
+export class CreateCategoryDto extends UpdateCategoryDto {
+  @ApiProperty({ example: 'healthcare-providers' })
+  @Matches(SLUG)
   @MaxLength(60)
   slug: string;
+
+  @ApiProperty({ example: 'Healthcare providers' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  declare name: string;
 }
 
-export class UpsertDimensionDto {
-  @ApiProperty({ example: 'Cleanliness' })
+export class UpdateDimensionDto {
+  @ApiPropertyOptional({ example: 'Cleanliness' })
+  @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(60)
-  name: string;
+  label?: string;
 
-  @ApiPropertyOptional({ example: 'How clean the place or product was' })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsString()
   @MaxLength(200)
   description?: string;
 
-  @ApiPropertyOptional({ example: true })
+  @ApiPropertyOptional()
   @IsOptional()
   @IsBoolean()
-  isActive?: boolean;
+  active?: boolean;
 }
 
-export class CreateDimensionDto extends UpsertDimensionDto {
+export class CreateDimensionDto extends UpdateDimensionDto {
   @ApiProperty({ example: 'cleanliness' })
   @Matches(/^[a-z0-9]+(_[a-z0-9]+)*$/)
   @MaxLength(60)
   key: string;
+
+  @ApiProperty({ example: 'Cleanliness' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(60)
+  declare label: string;
+}
+
+export class UpdateCityDto {
+  @ApiPropertyOptional({ example: 'Port Harcourt' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  name?: string;
+
+  @ApiPropertyOptional({ example: 'Rivers' })
+  @IsOptional()
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  state?: string;
+
+  @ApiPropertyOptional({ example: true })
+  @IsOptional()
+  @IsBoolean()
+  active?: boolean;
+}
+
+export class CreateCityDto extends UpdateCityDto {
+  @ApiProperty({ example: 'Port Harcourt' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  declare name: string;
+
+  @ApiProperty({ example: 'Rivers' })
+  @IsString()
+  @MinLength(2)
+  @MaxLength(80)
+  declare state: string;
+
+  @ApiPropertyOptional({ example: 'NG', default: 'NG' })
+  @IsOptional()
+  @Matches(/^[A-Z]{2}$/)
+  countryCode?: string;
 }
 
 export class AuditQueryDto extends PaginationQueryDto {
-  @ApiPropertyOptional({ example: 'business' })
+  @ApiPropertyOptional({
+    enum: [
+      'review',
+      'business',
+      'user',
+      'suggestion',
+      'claim',
+      'report',
+      'dispute',
+      'category',
+      'role',
+    ],
+  })
   @IsOptional()
   @IsString()
   @MaxLength(40)
@@ -412,4 +559,21 @@ export class AuditQueryDto extends PaginationQueryDto {
   @IsString()
   @MaxLength(60)
   action?: string;
+
+  @ApiPropertyOptional({ example: '2026-11-01' })
+  @IsOptional()
+  @IsDateString()
+  from?: string;
+
+  @ApiPropertyOptional({ example: '2026-11-30' })
+  @IsOptional()
+  @IsDateString()
+  to?: string;
+}
+
+export class EmailLogQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({ enum: ['pending', 'sent', 'failed'] })
+  @IsOptional()
+  @IsIn(['pending', 'sent', 'failed'])
+  status?: string;
 }

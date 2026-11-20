@@ -1,5 +1,7 @@
 # TalkGround API v2.0 — PRD rebuild (changelog & design record)
 
+> **Superseded by [API-CHANGELOG-v2.5.md](./API-CHANGELOG-v2.5.md)** (PRD v2.5). Kept for history.
+
 **Released:** 20 November 2026 · **Spec:** TalkGround PRD (MVP Specification) · **Migration:** `20261120120000_prd_rebuild`
 
 v2.0 rebuilds the domain to match the PRD: a general business-reputation platform for Nigeria (6 expandable

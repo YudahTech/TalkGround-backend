@@ -24,7 +24,6 @@ import {
 } from './auth.dto';
 import { generateOtp } from '../common/utils';
 import {
-  durationToMs,
   envFlag,
   hmacCode,
   randomToken,
@@ -33,6 +32,8 @@ import {
 } from '../common/security';
 import { SmsService } from './sms.service';
 import { EmailService } from '../email/email.service';
+import { AppConfig } from '../common/app-config';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export const BCRYPT_COST = 12;
 const OTP_TTL_MS = 10 * 60 * 1000;
@@ -61,6 +62,8 @@ export class AuthService {
     private config: ConfigService,
     private sms: SmsService,
     private email: EmailService,
+    private appConfig: AppConfig,
+    private notify: NotificationsService,
   ) {}
 
   // ---------------------------------------------------------------- helpers
@@ -95,8 +98,9 @@ export class AuthService {
     return this.config.get<string>('JWT_SECRET', 'dev-secret');
   }
 
+  /** Capped at 15 minutes (PRD v2.5 §7.1). */
   accessTtlMs(): number {
-    return durationToMs(this.config.get<string>('JWT_EXPIRES_IN', '15m'));
+    return this.appConfig.accessTokenMs;
   }
 
   refreshTtlMs(): number {
@@ -557,7 +561,7 @@ export class AuthService {
       },
     });
     await this.revokeAllSessions(stored.userId);
-    void this.email.passwordChanged(stored.user.email, stored.user.displayName);
+    void this.notifyPasswordChanged(stored.userId);
     return {
       message: 'Password updated. Please log in with your new password.',
     };
@@ -575,7 +579,7 @@ export class AuthService {
       data: { passwordHash: await bcrypt.hash(dto.newPassword, BCRYPT_COST) },
     });
     await this.revokeAllSessions(userId);
-    void this.email.passwordChanged(user.email, user.displayName);
+    void this.notifyPasswordChanged(userId);
     const fresh = await this.prisma.user.findUniqueOrThrow({
       where: { id: userId },
     });
@@ -585,5 +589,18 @@ export class AuthService {
       user: await this.sanitizeUser(fresh),
       message: 'Password changed',
     };
+  }
+
+  /** PRD §7.14 account-security email, recorded in the delivery log. */
+  private notifyPasswordChanged(userId: string) {
+    return this.notify.toUser(
+      userId,
+      'account.security',
+      'Your TalkGround password was changed',
+      [
+        'Your TalkGround password was just changed and all sessions were signed out.',
+        "If this wasn't you, reset your password immediately.",
+      ],
+    );
   }
 }

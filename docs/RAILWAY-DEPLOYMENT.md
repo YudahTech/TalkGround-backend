@@ -218,8 +218,7 @@ Seed accounts (same as local):
 
 | Email | Password | Role |
 |-------|----------|------|
-| `chinedu.okafor@gmail.com` | `demo1234` | USER |
-| `admin@revyu.ng` | `admin123` | ADMIN |
+| `a seeded demo account` | <demo password, shared privately> | USER |
 
 ---
 
@@ -250,7 +249,7 @@ OpenAPI:      https://YOUR-HOST/docs/openapi.json
 Frontend env:
 NEXT_PUBLIC_API_URL=https://YOUR-HOST/api/v1
 
-Demo: chinedu.okafor@gmail.com / demo1234
+Demo: a seeded demo account / <demo password, shared privately>
 (v1: JWT enough to write reviews — no phone OTP required)
 ```
 

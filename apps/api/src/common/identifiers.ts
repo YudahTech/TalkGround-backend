@@ -1,26 +1,17 @@
 import { BadRequestException } from '@nestjs/common';
 import { IdentifierType } from '@prisma/client';
 
-/** Identifier types that may belong to only one business (duplicate detection, PRD §7.2/§7.3). */
-export const UNIQUE_IDENTIFIER_TYPES: IdentifierType[] = [
-  IdentifierType.INSTAGRAM,
-  IdentifierType.TIKTOK,
-  IdentifierType.FACEBOOK,
-  IdentifierType.X,
-  IdentifierType.WHATSAPP,
-  IdentifierType.WEBSITE,
-  IdentifierType.PHONE,
-  IdentifierType.EMAIL,
-  IdentifierType.CAC_NUMBER,
-];
+/**
+ * Identifier normalisation (PRD v2.5 §13 "Identifier matching rules"). Identifiers are NOT unique:
+ * a match is a duplicate signal for staff, never an automatic rejection or merge.
+ */
 
-/** Identifier types that are social accounts (owners manage these as "public business links"). */
+/** Social handles are strong duplicate signals (while current). */
 export const SOCIAL_IDENTIFIER_TYPES: IdentifierType[] = [
   IdentifierType.INSTAGRAM,
   IdentifierType.TIKTOK,
   IdentifierType.FACEBOOK,
   IdentifierType.X,
-  IdentifierType.WHATSAPP,
 ];
 
 const SOCIAL_HOSTS: Partial<Record<IdentifierType, RegExp>> = {
@@ -30,9 +21,11 @@ const SOCIAL_HOSTS: Partial<Record<IdentifierType, RegExp>> = {
   X: /^(?:https?:\/\/)?(?:www\.)?(?:x|twitter)\.com\//i,
 };
 
-/** "+2348012345678" from "08012345678", "2348012345678" or "+234 801 234 5678". Null otherwise. */
+/** "+2348012345678" from "08012345678", "2348012345678", "+234 801 234 5678" or "wa.me/234…". */
 export function normalizeNigerianPhone(input: string): string | null {
-  const digits = input.replace(/[^\d+]/g, '');
+  const digits = input
+    .replace(/^(?:https?:\/\/)?wa\.me\//i, '')
+    .replace(/[^\d+]/g, '');
   let national: string | null = null;
   if (/^\+234\d{10}$/.test(digits)) national = digits.slice(4);
   else if (/^234\d{10}$/.test(digits)) national = digits.slice(3);
@@ -63,10 +56,7 @@ export function normalizeName(input: string): string {
     .trim();
 }
 
-/**
- * Canonical form of an identifier, used for search and duplicate detection.
- * Throws 400 for values that can't be a valid identifier of that type.
- */
+/** Canonical form used for lookup and duplicate detection. Throws 400 for impossible values. */
 export function normalizeIdentifier(
   type: IdentifierType,
   value: string,
@@ -95,14 +85,10 @@ export function normalizeIdentifier(
       if (!domain) throw new BadRequestException(`Invalid website: ${v}`);
       return domain;
     }
-    case IdentifierType.PHONE:
-    case IdentifierType.WHATSAPP: {
-      const phone = normalizeNigerianPhone(
-        v.replace(/^(?:https?:\/\/)?wa\.me\//i, ''),
-      );
-      if (!phone) {
+    case IdentifierType.PHONE: {
+      const phone = normalizeNigerianPhone(v);
+      if (!phone)
         throw new BadRequestException(`Invalid Nigerian phone number: ${v}`);
-      }
       return phone;
     }
     case IdentifierType.EMAIL: {
@@ -112,43 +98,29 @@ export function normalizeIdentifier(
       }
       return email;
     }
-    case IdentifierType.CAC_NUMBER: {
-      const rc = v.toUpperCase().replace(/[\s-]/g, '');
-      if (!/^(RC|BN|IT|LP|LLP)?\d{4,10}$/.test(rc)) {
-        throw new BadRequestException(`Invalid CAC registration number: ${v}`);
-      }
-      return rc;
-    }
-    case IdentifierType.ALTERNATIVE_NAME: {
+    case IdentifierType.ALT_NAME: {
       const name = normalizeName(v);
       if (!name) throw new BadRequestException(`Invalid name: ${v}`);
       return name;
     }
     default:
-      return v.toLowerCase().slice(0, 200);
+      return v.toLowerCase().replace(/\s+/g, ' ').slice(0, 200);
   }
 }
 
-export function identifierUniqueKey(
-  type: IdentifierType,
-  normalized: string,
-): string | null {
-  return UNIQUE_IDENTIFIER_TYPES.includes(type)
-    ? `${type}:${normalized}`
-    : null;
-}
-
-/** Text the search index stores for an identifier. Handles are searchable with or without "@". */
+/**
+ * Text the search index stores for an identifier. Phones are matched EXACTLY through the
+ * identifier table (PRD §7.2), so their digits are not added to the fuzzy index.
+ */
 export function identifierSearchTerms(
   type: IdentifierType,
   value: string,
   normalized: string,
-): string {
+): string | null {
   switch (type) {
-    case IdentifierType.CAC_NUMBER:
     case IdentifierType.PHONE:
-    case IdentifierType.WHATSAPP:
     case IdentifierType.EMAIL:
+      return null;
     case IdentifierType.WEBSITE:
       return normalized;
     case IdentifierType.INSTAGRAM:

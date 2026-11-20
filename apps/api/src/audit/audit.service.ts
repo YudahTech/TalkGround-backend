@@ -10,18 +10,46 @@ export interface AuditActor {
   role?: string;
 }
 
+/** PRD v2.5 §8.5 target types. */
+export type AuditTarget =
+  | 'review'
+  | 'business'
+  | 'user'
+  | 'suggestion'
+  | 'claim'
+  | 'report'
+  | 'dispute'
+  | 'category'
+  | 'role';
+
 export interface AuditEntry {
   /** dot.separated verb, e.g. "claim.approve", "business.merge", "user.suspend". */
   action: string;
-  /** user | business | review | claim | submission | report | dispute | admin_role | … */
-  targetType: string;
+  targetType: AuditTarget;
   targetId: string;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
+  reason?: string | null;
   metadata?: Record<string, unknown>;
 }
 
+export interface AuditQuery {
+  page: number;
+  limit: number;
+  targetType?: string;
+  targetId?: string;
+  actorId?: string;
+  action?: string;
+  from?: string;
+  to?: string;
+}
+
+const json = (v: unknown) =>
+  v === undefined || v === null ? undefined : (v as Prisma.InputJsonValue);
+
 /**
- * Append-only audit trail for sensitive actions (PRD §8.5): actor, action, affected record,
- * timestamp. There is no update or delete path for audit rows anywhere in the API.
+ * Append-only audit trail (PRD §8.5): actor, action, target type and id, before/after values,
+ * reason and timestamp. There is no update or delete path for audit rows anywhere in the API.
  */
 @Injectable()
 export class AuditService {
@@ -44,9 +72,10 @@ export class AuditService {
       action: entry.action,
       targetType: entry.targetType,
       targetId: entry.targetId,
-      metadata: (entry.metadata ?? undefined) as
-        | Prisma.InputJsonValue
-        | undefined,
+      before: json(entry.before),
+      after: json(entry.after),
+      reason: entry.reason ?? null,
+      metadata: json(entry.metadata),
     };
     if (db) {
       await db.auditLog.create({ data });
@@ -62,29 +91,86 @@ export class AuditService {
     }
   }
 
-  async list(params: {
-    page: number;
-    limit: number;
-    targetType?: string;
-    targetId?: string;
-    actorId?: string;
-    action?: string;
-  }) {
-    const where: Prisma.AuditLogWhereInput = {
-      targetType: params.targetType,
-      targetId: params.targetId,
-      actorId: params.actorId,
-      ...(params.action ? { action: { startsWith: params.action } } : {}),
+  private where(q: AuditQuery): Prisma.AuditLogWhereInput {
+    return {
+      targetType: q.targetType,
+      targetId: q.targetId,
+      actorId: q.actorId,
+      ...(q.action ? { action: { startsWith: q.action } } : {}),
+      ...(q.from || q.to
+        ? {
+            createdAt: {
+              ...(q.from ? { gte: new Date(q.from) } : {}),
+              ...(q.to ? { lte: new Date(q.to) } : {}),
+            },
+          }
+        : {}),
     };
+  }
+
+  async list(q: AuditQuery) {
+    const where = this.where(q);
     const [total, rows] = await Promise.all([
       this.prisma.auditLog.count({ where }),
       this.prisma.auditLog.findMany({
         where,
         orderBy: { createdAt: 'desc' },
-        ...skipTake(params.page, params.limit),
+        ...skipTake(q.page, q.limit),
         include: { actor: { select: { username: true, displayName: true } } },
       }),
     ]);
-    return { data: rows, meta: pageMeta(params.page, params.limit, total) };
+    return { data: rows, meta: pageMeta(q.page, q.limit, total) };
+  }
+
+  /** CSV export (auditlog.export), newest first, at most 10,000 rows per request. */
+  async exportCsv(q: Omit<AuditQuery, 'page' | 'limit'>): Promise<string> {
+    const rows = await this.prisma.auditLog.findMany({
+      where: this.where({ ...q, page: 1, limit: 1 }),
+      orderBy: { createdAt: 'desc' },
+      take: 10_000,
+      include: { actor: { select: { username: true } } },
+    });
+    const cell = (v: unknown) => {
+      const s =
+        v === null || v === undefined
+          ? ''
+          : typeof v === 'string'
+            ? v
+            : JSON.stringify(v);
+      // Neutralise spreadsheet formula injection and quote every cell.
+      const safe = /^[=+\-@\t\r]/.test(s) ? `'${s}` : s;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+    const header = [
+      'createdAt',
+      'actorId',
+      'actorUsername',
+      'actorRole',
+      'action',
+      'targetType',
+      'targetId',
+      'reason',
+      'before',
+      'after',
+      'metadata',
+    ];
+    const lines = rows.map((r) =>
+      [
+        r.createdAt.toISOString(),
+        r.actorId,
+        r.actor?.username,
+        r.actorRole,
+        r.action,
+        r.targetType,
+        r.targetId,
+        r.reason,
+        r.before,
+        r.after,
+        r.metadata,
+      ]
+        .map(cell)
+        .join(','),
+    );
+    return [header.join(','), ...lines].join('\r\n');
   }
 }

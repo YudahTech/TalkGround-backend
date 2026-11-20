@@ -34,7 +34,7 @@ OTP_DEV_MODE=true
 |----------------|-------------------|
 | OTP logged in API terminal | Text reviews work |
 | Demo user already `phoneVerified` | Skip `POST /uploads/signature` and media |
-| Use `chinedu.okafor@gmail.com` / `demo1234` | Use `avatarUrl` as null or external URL in PATCH |
+| Use `a seeded demo account` / <demo password, shared privately> | Use `avatarUrl` as null or external URL in PATCH |
 
 ---
 
@@ -54,8 +54,7 @@ See also: [SWAGGER-GUIDE.md](./SWAGGER-GUIDE.md)
 
 | Email | Password | Role | Phone verified |
 |-------|----------|------|----------------|
-| `chinedu.okafor@gmail.com` | `demo1234` | USER | Yes |
-| `admin@revyu.ng` | `admin123` | ADMIN | Yes |
+| `a seeded demo account` | <demo password, shared privately> | USER | Yes |
 
 Sample brand slug: `nexxas-kitchen`
 
@@ -86,8 +85,8 @@ Sample brand slug: `nexxas-kitchen`
 **Body:**
 ```json
 {
-  "email": "chinedu.okafor@gmail.com",
-  "password": "demo1234"
+  "email": "a seeded demo account",
+  "password": "<demo password, shared privately>"
 }
 ```
 
@@ -98,7 +97,7 @@ Later tests reuse the cookie (browser/Swagger automatically, curl via `-b jar.tx
 
 ### POST `/auth/forgot-password` — Public
 
-**Body:** `{ "email": "chinedu.okafor@gmail.com" }`
+**Body:** `{ "email": "a seeded demo account" }`
 
 **Expect:** `200` + generic message (email not actually sent yet)
 
@@ -332,7 +331,7 @@ Toggle on second call.
 
 ### GET `/waitlist/stats` — Admin JWT
 
-Login as `admin@revyu.ng`
+Login as `the staff account created with `npm run admin:create``
 
 **Expect:** `200` + `{ data: { total, byCity: { lagos, abuja } } }`  
 **403** as regular user

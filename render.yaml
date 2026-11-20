@@ -14,8 +14,9 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "20"
+      # PRD v2.5 §7.1: 15 minutes or less (the API also caps it at 15m).
       - key: JWT_EXPIRES_IN
-        value: "7d"
+        value: "15m"
       # Testing only: returns SMS codes in API responses. Set "false" once TERMII_API_KEY is configured.
       - key: OTP_DEV_MODE
         value: "true"
@@ -28,6 +29,11 @@ services:
       - key: EMAIL_FROM
         sync: false
       - key: FRONTEND_URL
+        sync: false
+      # Optional on-demand revalidation of server-rendered pages (PRD §7.13)
+      - key: FRONTEND_REVALIDATE_URL
+        sync: false
+      - key: REVALIDATE_SECRET
         sync: false
       - key: TERMII_API_KEY
         sync: false

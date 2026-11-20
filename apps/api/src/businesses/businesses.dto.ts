@@ -12,28 +12,29 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   Max,
   MaxLength,
   Min,
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { IdentifierType, LocationType } from '@prisma/client';
+import { IdentifierType } from '@prisma/client';
 import { PaginationQueryDto } from '../common/pagination';
+import { toUpperCase } from '../common/transforms';
 
-const upper = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.toUpperCase() : value;
+const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 export class IdentifierInputDto {
   @ApiProperty({ enum: IdentifierType, example: IdentifierType.INSTAGRAM })
-  @Transform(upper)
+  @Transform(toUpperCase)
   @IsEnum(IdentifierType)
   type: IdentifierType;
 
   @ApiProperty({
-    example: '@kemis_closet',
+    example: '@mamaput_lagos',
     description:
-      'Handle, URL, phone, email, CAC number or alternative name. Normalised server-side.',
+      'Handle or profile URL, website, phone, email, alternative name or other public identifier. Normalised server-side.',
   })
   @IsString()
   @MinLength(1)
@@ -41,52 +42,33 @@ export class IdentifierInputDto {
   value: string;
 }
 
-export class LocationInputDto {
-  @ApiPropertyOptional({ enum: LocationType, default: LocationType.ADDRESS })
+/** Location fields shared by create/update/submission: a city (GET /cities) plus area, or online only. */
+export class LocationFieldsDto {
+  @ApiPropertyOptional({
+    example: 'lagos',
+    description: 'City slug from GET /cities. Omit when onlineOnly.',
+  })
   @IsOptional()
-  @Transform(upper)
-  @IsEnum(LocationType)
-  type?: LocationType;
-
-  @ApiPropertyOptional({ example: '12 Admiralty Way' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  addressLine?: string;
-
-  @ApiPropertyOptional({ example: 'Lekki Phase 1' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  area?: string;
-
-  @ApiPropertyOptional({ example: 'Lagos' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
+  @Matches(SLUG)
+  @MaxLength(60)
   city?: string;
 
   @ApiPropertyOptional({
-    example: 'lagos',
-    description: 'Nigerian state slug or name (see GET /locations)',
+    example: 'Yaba',
+    description: 'Neighbourhood or area (free text)',
   })
   @IsOptional()
   @IsString()
-  @MaxLength(60)
-  state?: string;
+  @MaxLength(120)
+  area?: string;
 
   @ApiPropertyOptional({
     example: false,
-    description: 'Operates nationwide (e.g. delivers anywhere in Nigeria)',
+    description: 'No physical location: sells online or delivers only',
   })
   @IsOptional()
   @IsBoolean()
-  nationwide?: boolean;
-
-  @ApiPropertyOptional({ example: true })
-  @IsOptional()
-  @IsBoolean()
-  isPrimary?: boolean;
+  onlineOnly?: boolean;
 }
 
 export const BUSINESS_SORTS = ['relevance', 'most_reviewed', 'rating'] as const;
@@ -94,9 +76,9 @@ export type BusinessSort = (typeof BUSINESS_SORTS)[number];
 
 export class SearchBusinessesQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
-    example: 'kemi',
+    example: '@mamaput_lagos',
     description:
-      'Name, alternative name, social handle (with or without @), website, phone or CAC number. Partial matches work.',
+      'Name, alternative name, social handle (with or without @), website domain, phone (exact), category, city or area. Partial words work.',
   })
   @IsOptional()
   @IsString()
@@ -104,33 +86,24 @@ export class SearchBusinessesQueryDto extends PaginationQueryDto {
   q?: string;
 
   @ApiPropertyOptional({
-    example: 'fashion-clothing',
+    example: 'food-and-restaurants',
     description: 'Category slug',
   })
   @IsOptional()
-  @IsString()
+  @Matches(SLUG)
   @MaxLength(60)
   category?: string;
 
-  @ApiPropertyOptional({ example: 'lagos', description: 'State slug or name' })
+  @ApiPropertyOptional({ example: 'lagos', description: 'City slug' })
   @IsOptional()
-  @IsString()
+  @Matches(SLUG)
   @MaxLength(60)
-  state?: string;
-
-  @ApiPropertyOptional({
-    example: 'Lekki',
-    description: 'City or area (partial match)',
-  })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
   city?: string;
 
   @ApiPropertyOptional({
     example: 4,
     description:
-      'Minimum average rating. Only businesses with enough reviews for a reliable rating can match.',
+      'Minimum average rating. Only businesses with enough reviews for a displayed rating can match.',
   })
   @IsOptional()
   @Type(() => Number)
@@ -145,17 +118,19 @@ export class SearchBusinessesQueryDto extends PaginationQueryDto {
   sort?: BusinessSort;
 }
 
-/** Fields shared by admin create/edit. */
-export class BusinessProfileFieldsDto {
-  @ApiPropertyOptional({ example: 'Contemporary womenswear made in Lagos.' })
+export class BusinessProfileFieldsDto extends LocationFieldsDto {
+  @ApiPropertyOptional({
+    example:
+      'Home-style Nigerian food in Yaba: amala, ewedu, ofada rice and pepper soup, with delivery across the mainland.',
+    description:
+      'Factual, specific description. At least 80 characters for the page to be indexable (PRD §7.13).',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(2000)
   description?: string;
 
   @ApiPropertyOptional({
-    example:
-      'https://res.cloudinary.com/demo/image/upload/talkground/logos/abc.png',
     description:
       'From an upload to the "logos" folder (POST /uploads/signature)',
   })
@@ -164,13 +139,13 @@ export class BusinessProfileFieldsDto {
   @MaxLength(500)
   logoUrl?: string;
 
-  @ApiPropertyOptional({ example: 'https://kemiscloset.ng' })
+  @ApiPropertyOptional({ example: 'https://mamaput.ng' })
   @IsOptional()
   @IsUrl({ protocols: ['http', 'https'] })
   @MaxLength(300)
   website?: string;
 
-  @ApiPropertyOptional({ example: 'hello@kemiscloset.ng' })
+  @ApiPropertyOptional({ example: 'hello@mamaput.ng' })
   @IsOptional()
   @IsEmail()
   @MaxLength(200)
@@ -184,14 +159,17 @@ export class BusinessProfileFieldsDto {
 }
 
 export class CreateBusinessDto extends BusinessProfileFieldsDto {
-  @ApiProperty({ example: "Kemi's Closet" })
+  @ApiProperty({ example: 'Mama Put Kitchen' })
   @IsString()
   @MinLength(2)
   @MaxLength(120)
   name: string;
 
-  @ApiProperty({ example: 'fashion-clothing', description: 'Category slug' })
-  @IsString()
+  @ApiProperty({
+    example: 'food-and-restaurants',
+    description: 'Category slug',
+  })
+  @Matches(SLUG)
   @MaxLength(60)
   category: string;
 
@@ -203,17 +181,9 @@ export class CreateBusinessDto extends BusinessProfileFieldsDto {
   @Type(() => IdentifierInputDto)
   identifiers?: IdentifierInputDto[];
 
-  @ApiPropertyOptional({ type: [LocationInputDto] })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(20)
-  @ValidateNested({ each: true })
-  @Type(() => LocationInputDto)
-  locations?: LocationInputDto[];
-
   @ApiPropertyOptional({
     default: true,
-    description: 'false keeps the listing in pending_review (not public)',
+    description: 'false creates the listing in pending_review (not public)',
   })
   @IsOptional()
   @IsBoolean()
@@ -222,7 +192,7 @@ export class CreateBusinessDto extends BusinessProfileFieldsDto {
   @ApiPropertyOptional({
     default: false,
     description:
-      'Required when similarly named businesses exist: confirms this is a different business.',
+      'Required when possible duplicates exist: confirms this is a different business.',
   })
   @IsOptional()
   @IsBoolean()
@@ -230,44 +200,24 @@ export class CreateBusinessDto extends BusinessProfileFieldsDto {
 }
 
 export class AdminUpdateBusinessDto extends BusinessProfileFieldsDto {
-  @ApiPropertyOptional({ example: "Kemi's Closet" })
+  @ApiPropertyOptional({
+    description: 'Renaming regenerates the slug; the old one redirects (301).',
+  })
   @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional({ example: 'fashion-clothing' })
+  @ApiPropertyOptional({ example: 'food-and-restaurants' })
   @IsOptional()
-  @IsString()
+  @Matches(SLUG)
   @MaxLength(60)
   category?: string;
-
-  @ApiPropertyOptional({
-    type: [LocationInputDto],
-    description: 'Replaces all locations',
-  })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(20)
-  @ValidateNested({ each: true })
-  @Type(() => LocationInputDto)
-  locations?: LocationInputDto[];
 }
 
-/** What a business owner may change (PRD §7.10 "permitted profile information"). */
-export class ManageBusinessDto extends BusinessProfileFieldsDto {
-  @ApiPropertyOptional({
-    type: [LocationInputDto],
-    description: 'Replaces all locations',
-  })
-  @IsOptional()
-  @IsArray()
-  @ArrayMaxSize(20)
-  @ValidateNested({ each: true })
-  @Type(() => LocationInputDto)
-  locations?: LocationInputDto[];
-}
+/** What a business member may change (PRD §7.10 "permitted profile fields"). */
+export class ManageBusinessDto extends BusinessProfileFieldsDto {}
 
 export class ReviewListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
@@ -289,4 +239,15 @@ export class ReviewListQueryDto extends PaginationQueryDto {
   @Min(1)
   @Max(5)
   stars?: number;
+}
+
+export class CategoryPageQueryDto extends PaginationQueryDto {
+  @ApiPropertyOptional({
+    example: 'lagos',
+    description: 'City slug for /c/{category}/{city}',
+  })
+  @IsOptional()
+  @Matches(SLUG)
+  @MaxLength(60)
+  city?: string;
 }

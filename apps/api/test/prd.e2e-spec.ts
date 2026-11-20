@@ -1,6 +1,7 @@
 /**
- * End-to-end tests of the PRD (§17 MVP acceptance criteria), against a real Postgres.
- * Each "user" is a supertest agent that keeps its HttpOnly session cookies, exactly like a browser.
+ * End-to-end tests of PRD v2.5 against a real Postgres (§19 acceptance criteria and the §0.3
+ * definition of done: success, permission-denied and validation-failed cases per feature).
+ * Each "user" is a supertest agent that keeps its HttpOnly cookies, exactly like a browser.
  *
  *   DATABASE_URL=postgresql://postgres:postgres@localhost:5544/talkground_test npm run test:e2e
  */
@@ -13,11 +14,12 @@ import { PrismaService } from '../src/prisma/prisma.service';
 
 const ORIGIN = 'http://localhost:3000';
 const API = '/api/v1';
+const DEMO = 'E2e-Demo-Password-1';
+const ADMIN = 'E2e-Admin-Password-1';
 
 let app: INestApplication;
 let prisma: PrismaService;
 let ipCounter = 10;
-
 type Agent = ReturnType<typeof request.agent>;
 
 /** A browser-like client: cookie jar + its own client IP + an allowed Origin on writes. */
@@ -44,13 +46,6 @@ class Client {
       .set('X-Forwarded-For', this.ip)
       .send(body ?? {});
   }
-  put(url: string, body?: object) {
-    return this.agent
-      .put(API + url)
-      .set('Origin', ORIGIN)
-      .set('X-Forwarded-For', this.ip)
-      .send(body ?? {});
-  }
   delete(url: string, body?: object) {
     return this.agent
       .delete(API + url)
@@ -59,34 +54,46 @@ class Client {
       .send(body ?? {});
   }
 }
+const guest = () => new Client();
 
-async function login(email: string, password = 'demo1234') {
+async function login(email: string, password = DEMO) {
   const c = new Client();
   const res = await c.post('/auth/login', { email, password });
   expect(res.status).toBe(201);
   return c;
 }
 
-/** Register + verify email (EMAIL_DEV_MODE returns the code). */
 async function newVerifiedUser(username: string) {
   const c = new Client();
   const reg = await c.post('/auth/register', {
-    email: `${username}@example.com`,
+    email: `${username}@example.org`,
     password: 'Secret123!',
     displayName: username.replace('_', ' '),
     username,
   });
   expect(reg.status).toBe(201);
-  const code = reg.body.data.devEmailCode;
-  expect(code).toMatch(/^\d{6}$/);
-  const ok = await c.post('/auth/verify-email/confirm', { otp: code });
-  expect(ok.status).toBeLessThan(300);
+  expect(
+    (
+      await c.post('/auth/verify-email/confirm', {
+        otp: reg.body.data.devEmailCode,
+      })
+    ).status,
+  ).toBeLessThan(300);
   return c;
 }
 
 const ids: Record<string, string> = {};
-const businessId = async (slug: string) =>
+const bizId = async (slug: string) =>
   (await prisma.business.findUniqueOrThrow({ where: { slug } })).id;
+const BODY =
+  'This is a detailed and honest description of my experience with the business, long enough to pass the minimum.';
+
+let admin: Client; // super_admin
+let listings: Client; // admin
+let moderator: Client; // moderator
+let consumer: Client; // registered in this suite
+let reviewer2: Client; // seeded consumer
+let owner: Client; // seeded member of Kemi's Closet
 
 beforeAll(async () => {
   const moduleRef = await Test.createTestingModule({
@@ -95,23 +102,22 @@ beforeAll(async () => {
   app = configureApp(moduleRef.createNestApplication());
   await app.init();
   prisma = app.get(PrismaService);
+  admin = await login('admin@talkground.test', ADMIN);
+  listings = await login('listings@talkground.test');
+  moderator = await login('moderator@talkground.test');
+  reviewer2 = await login('reviewer2@talkground.test');
+  owner = await login('owner@talkground.test');
 });
 
 afterAll(async () => {
   await app.close();
 });
 
-let admin: Client;
-let moderator: Client;
-let consumer: Client;
-let consumer2: Client;
-let ownerCandidate: Client;
-
-describe('AC1, AC18: accounts and cookie-only authentication', () => {
-  it('registers with HttpOnly cookies and no tokens in the body', async () => {
+describe('§7.1 accounts and security', () => {
+  it('registers with HttpOnly cookies, no tokens in the body, and a 15-minute access token even if configured longer', async () => {
     consumer = new Client();
     const res = await consumer.post('/auth/register', {
-      email: 'e2e_consumer@example.com',
+      email: 'e2e_consumer@example.org',
       password: 'Secret123!',
       displayName: 'E2E Consumer',
       username: 'e2e_consumer',
@@ -120,47 +126,35 @@ describe('AC1, AC18: accounts and cookie-only authentication', () => {
     expect(JSON.stringify(res.body)).not.toMatch(
       /"accessToken"|"refreshToken"/,
     );
+    expect(res.body.data.expiresIn).toBe(900);
     const cookies = ([] as string[]).concat(res.headers['set-cookie'] ?? []);
     expect(
       cookies.some(
         (c) => c.startsWith('talkground_at=') && /HttpOnly/i.test(c),
       ),
     ).toBe(true);
-    expect(
-      cookies.some(
-        (c) => c.startsWith('talkground_rt=') && /HttpOnly/i.test(c),
-      ),
-    ).toBe(true);
-    ids.consumerCode = res.body.data.devEmailCode;
+    ids.code = res.body.data.devEmailCode;
   });
 
-  it('blocks reviewing until the email is verified', async () => {
-    const res = await consumer.post('/reviews', {
-      businessId: await businessId('adire-lane'),
+  it('requires a verified email to review (phone not required by default)', async () => {
+    const r = await consumer.post('/reviews', {
+      businessId: await bizId('adire-lane'),
       overallRating: 4,
-      body: 'This should be rejected because the email address is not verified yet.',
+      title: 'Too early',
+      body: BODY,
     });
-    expect(res.status).toBe(403);
-  });
-
-  it('verifies the email and loads the account', async () => {
+    expect(r.status).toBe(403);
     expect(
-      (
-        await consumer.post('/auth/verify-email/confirm', {
-          otp: ids.consumerCode,
-        })
-      ).status,
+      (await consumer.post('/auth/verify-email/confirm', { otp: ids.code }))
+        .status,
     ).toBeLessThan(300);
     const me = await consumer.get('/users/me');
-    expect(me.status).toBe(200);
     expect(me.body.data.emailVerified).toBe(true);
-    expect(me.body.data.isStaff).toBe(false);
+    expect(me.body.data.phoneVerified).toBe(false);
   });
 
-  it('rejects protected calls without a cookie, and ignores Bearer headers', async () => {
-    expect(
-      (await request(app.getHttpServer()).get(`${API}/users/me`)).status,
-    ).toBe(401);
+  it('rejects unauthenticated and Bearer-only calls; validation fails cleanly', async () => {
+    expect((await guest().get('/users/me')).status).toBe(401);
     expect(
       (
         await request(app.getHttpServer())
@@ -168,332 +162,669 @@ describe('AC1, AC18: accounts and cookie-only authentication', () => {
           .set('Authorization', 'Bearer x.y.z')
       ).status,
     ).toBe(401);
+    const bad = await guest().post('/auth/register', {
+      email: 'not-an-email',
+      password: '1',
+    });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.code).toBe('BAD_REQUEST');
   });
 
-  it('lets users choose what their public profile shows', async () => {
-    expect(
-      (
-        await consumer.patch('/users/me', {
-          location: 'Yaba, Lagos',
-          bio: 'I review vendors.',
-        })
-      ).status,
-    ).toBe(200);
-    const pub = await new Client().get('/users/e2e_consumer');
-    expect(pub.status).toBe(200);
+  it('keeps public profiles to what users chose to show', async () => {
+    await consumer.patch('/users/me', { location: 'Yaba, Lagos' });
+    const pub = await guest().get('/users/e2e_consumer');
     expect(pub.body.data.location).toBe('Yaba, Lagos');
     expect(JSON.stringify(pub.body)).not.toMatch(
-      /e2e_consumer@example\.com|emailVerified|phone/,
+      /@example\.org|emailVerified|phone/,
     );
   });
 
-  it('logs in the seeded staff and users', async () => {
-    admin = await login('admin@revyu.ng', 'admin123');
-    moderator = await login('moderator@example.com');
-    consumer2 = await login('reviewer2@example.com');
-    const me = await admin.get('/users/me');
-    expect(me.body.data.isStaff).toBe(true);
-    expect(me.body.data.staffRole.key).toBe('super_admin');
+  it('has no revyu strings or demo credentials in the public OpenAPI document', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DocumentBuilder, SwaggerModule } = require('@nestjs/swagger');
+    const text = JSON.stringify(SwaggerModule.createDocument(app, new DocumentBuilder().build()));
+    expect(text.length).toBeGreaterThan(10_000);
+    expect(text.toLowerCase()).not.toContain('revyu');
+    expect(text).not.toMatch(/demo1234|admin123|@gmail\.com|E2e-.*-Password/);
   });
 });
 
-describe('AC2, AC13, AC14: public discovery, ratings and insufficient data', () => {
-  const guest = () => new Client();
-
-  it('searches by name, partial name, handle, website and phone without signing in', async () => {
-    const byName = await guest().get('/businesses?q=kemi');
-    expect(byName.status).toBe(200);
-    expect(byName.body.data[0].slug).toBe('kemi-s-closet');
+describe('§5 categories and cities are database records, managed without a deploy', () => {
+  it('lists launch categories (hotels kept inactive) with configurable dimensions', async () => {
+    const cats = (await guest().get('/categories')).body.data;
+    expect(cats.map((c: { slug: string }) => c.slug)).toEqual([
+      'fashion-and-clothing',
+      'beauty-skincare-and-hair',
+      'electronics-and-gadgets',
+      'food-and-restaurants',
+      'logistics-and-delivery',
+      'general-consumer-services',
+    ]);
+    const food = cats.find(
+      (c: { slug: string }) => c.slug === 'food-and-restaurants',
+    );
     expect(
-      (await guest().get('/businesses?q=kem%20clo')).body.data[0].slug,
-    ).toBe('kemi-s-closet');
+      food.ratingDimensions.find((d: { key: string }) => d.key === 'delivery')
+        .required,
+    ).toBe(false);
     expect(
-      (await guest().get('/businesses?q=%40kemis_closet')).body.data[0].slug,
-    ).toBe('kemi-s-closet');
-    expect(
-      (await guest().get('/businesses?q=kemiscloset.ng')).body.data[0].slug,
-    ).toBe('kemi-s-closet');
-    expect(
-      (await guest().get('/businesses?q=0803%20123%204567')).body.data[0].slug,
-    ).toBe('kemi-s-closet');
-    expect(
-      (await guest().get('/businesses?q=RC1234567')).body.data[0].slug,
-    ).toBe('gadget-hub-ikeja');
+      food.ratingDimensions.find(
+        (d: { key: string }) => d.key === 'food_quality',
+      ).required,
+    ).toBe(true);
   });
 
-  it('filters by category, state and rating, and sorts', async () => {
-    const cat = await guest().get('/businesses?category=electronics-gadgets');
-    expect(cat.body.meta.total).toBe(3);
-    const fct = await guest().get('/businesses?state=abuja');
-    const slugs = fct.body.data.map((b: { slug: string }) => b.slug);
-    expect(slugs).toEqual(
+  it('lets an admin add a city and a category; moderators cannot', async () => {
+    expect(
+      (
+        await moderator.post('/admin/cities', {
+          name: 'Benin City',
+          state: 'Edo',
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await listings.post('/admin/cities', { name: '', state: 'Edo' })).status,
+    ).toBe(400);
+    const city = await listings.post('/admin/cities', {
+      name: 'Benin City',
+      state: 'Edo',
+    });
+    expect(city.status).toBe(201);
+    expect(
+      (await guest().get('/cities')).body.data.map(
+        (c: { slug: string }) => c.slug,
+      ),
+    ).toContain('benin-city');
+    const cat = await listings.post('/admin/categories', {
+      slug: 'healthcare-providers',
+      name: 'Healthcare providers',
+      dimensions: [{ key: 'service_quality', required: true }],
+    });
+    expect(cat.status).toBe(201);
+    expect(
+      (await guest().get('/categories/healthcare-providers')).body.data
+        .ratingDimensions,
+    ).toHaveLength(1);
+  });
+});
+
+describe('§7.2 search', () => {
+  it('finds a business by Instagram handle, name, partial words, website, area and exact phone', async () => {
+    const first = async (q: string) =>
+      (await guest().get(`/businesses?q=${encodeURIComponent(q)}`)).body.data[0]
+        ?.slug;
+    expect(await first('@mamaput_lagos')).toBe('mama-put-kitchen');
+    expect(await first('kemi')).toBe('kemi-s-closet');
+    expect(await first('kem clo')).toBe('kemi-s-closet');
+    expect(await first('kemiscloset.ng')).toBe('kemi-s-closet');
+    expect(await first('Surulere')).toBe('mama-put-kitchen');
+    expect(await first('0803 123 4567')).toBe('kemi-s-closet');
+    expect((await guest().get('/businesses?q=0803123')).body.data).toHaveLength(
+      0,
+    ); // phones match exactly
+  });
+
+  it('filters by category, city and rating (only businesses with a displayed rating) and sorts', async () => {
+    expect(
+      (await guest().get('/businesses?category=electronics-and-gadgets')).body
+        .meta.total,
+    ).toBe(3);
+    const lagos = (await guest().get('/businesses?city=lagos')).body.data.map(
+      (b: { slug: string }) => b.slug,
+    );
+    expect(lagos).toEqual(
+      expect.arrayContaining(['kemi-s-closet', 'gadget-hub-ikeja']),
+    );
+    expect(lagos).not.toContain('adire-lane');
+    const rated = (
+      await guest().get('/businesses?minRating=3.5')
+    ).body.data.map((b: { slug: string }) => b.slug);
+    expect(rated).toEqual(
       expect.arrayContaining([
-        'threadline-menswear',
         'kemi-s-closet',
         'swiftdrop-logistics',
+        'crown-and-coils-salon',
       ]),
     );
-    expect(slugs).not.toContain('adire-lane');
-    const rated = await guest().get('/businesses?minRating=4');
-    expect(rated.body.data.map((b: { slug: string }) => b.slug)).toEqual([
-      'kemi-s-closet',
-    ]);
-    const most = await guest().get('/businesses?sort=most_reviewed');
-    expect(most.body.data[0].slug).toBe('kemi-s-closet');
-  });
-
-  it('shows a numeric rating only with enough reviews, always with the count', async () => {
-    const kemi = (await guest().get('/businesses/kemi-s-closet')).body.data;
-    expect(kemi.rating.reviewCount).toBe(6);
-    expect(kemi.rating.average).toBe(4.2);
-    expect(kemi.rating.sufficientData).toBe(true);
-    expect(kemi.rating.distribution).toHaveLength(5);
-    expect(kemi.rating.dimensions).toHaveLength(5);
-    expect(kemi.ownership.label).toBe('Ownership verified');
-    const adire = (await guest().get('/businesses/adire-lane')).body.data;
-    expect(adire.rating.reviewCount).toBe(2);
-    expect(adire.rating.average).toBeNull();
-    expect(adire.rating.message).toMatch(/Not enough reviews/);
-  });
-
-  it('publishes categories with their dimensions, Nigerian states and the rating rules', async () => {
-    const cats = (await guest().get('/categories')).body.data;
-    expect(cats).toHaveLength(6);
-    const food = cats.find(
-      (c: { slug: string }) => c.slug === 'food-restaurants',
-    );
-    const delivery = food.ratingDimensions.find(
-      (d: { key: string }) => d.key === 'delivery_punctuality',
-    );
-    expect(delivery.required).toBe(false);
-    expect((await guest().get('/locations')).body.data.states).toHaveLength(37);
+    expect(rated).not.toContain('adire-lane'); // average 4.0 but only 2 reviews (< 3): no displayed rating
     expect(
-      (await guest().get('/meta/rating-methodology')).body.data.version,
-    ).toBe('1.0');
+      (await guest().get('/businesses?sort=most_reviewed')).body.data[0].slug,
+    ).toBe('kemi-s-closet');
+    expect((await guest().get('/businesses?sort=nonsense')).status).toBe(400);
+  });
+
+  it('sets cache headers on public reads only', async () => {
+    const pub = await guest().get('/businesses');
+    expect(pub.headers['cache-control']).toMatch(/s-maxage=900/);
+    expect((await consumer.get('/users/me')).headers['cache-control']).toBe(
+      'private, no-store',
+    );
   });
 });
 
-describe('AC3, AC4, AC5: submissions, admin listings, duplicates and merging', () => {
-  it('accepts a consumer suggestion and sends known businesses to their listing', async () => {
-    const res = await consumer.post('/business-submissions', {
-      name: 'Lagos Shoe Plug',
-      category: 'fashion-clothing',
-      state: 'lagos',
-      city: 'Lagos',
-      identifiers: [{ type: 'instagram', value: '@lagosshoeplug' }],
+describe('§7.3 profile, §7.12 ratings, §7.13 SEO', () => {
+  it('renders a complete, server-render-ready profile with separate labels and SEO data', async () => {
+    const p = (await guest().get('/businesses/kemi-s-closet')).body.data;
+    expect(p.kind).toBe('profile');
+    expect(p.rating.reviewCount).toBe(6);
+    expect(p.rating.average).toBe(4.2);
+    expect(p.rating.distribution).toHaveLength(5);
+    expect(p.rating.dimensions.map((d: { key: string }) => d.key)).toEqual([
+      'product_quality',
+      'sizing_fit',
+      'delivery',
+      'value_for_money',
+    ]);
+    expect(p.ownership).toMatchObject({
+      status: 'claimed',
+      ownershipVerified: true,
+      label: 'Ownership verified',
     });
-    expect(res.status).toBe(201);
-    expect(res.body.data.status).toBe('pending_review');
-    ids.submission = res.body.data.id;
+    expect(p.disclaimer).toBe(
+      'A public listing does not mean TalkGround endorses or has verified this business.',
+    );
+    expect(p.seo).toMatchObject({
+      indexable: true,
+      robots: 'index,follow',
+      canonicalPath: '/b/kemi-s-closet',
+      title: "Kemi's Closet Reviews | TalkGround",
+    });
+    expect(p.seo.jsonLd.aggregateRating).toEqual({
+      '@type': 'AggregateRating',
+      ratingValue: 4.2,
+      reviewCount: 6,
+      bestRating: 5,
+      worstRating: 1,
+    });
+    expect(p.seo.description).not.toMatch(/verified|trusted/i);
+    const review = p.recentReviews[0];
+    for (const field of [
+      'evidenceAttached',
+      'evidenceStatus',
+      'underInvestigation',
+    ])
+      expect(review).toHaveProperty(field);
+    expect(review.reviewer).toHaveProperty('emailVerified');
+    expect(JSON.stringify(p)).not.toMatch(/verified purchase/i);
+  });
 
-    const dup = await consumer.post('/business-submissions', {
+  it('shows "Not enough reviews yet" below 3 reviews, with no aggregateRating markup', async () => {
+    const p = (await guest().get('/businesses/adire-lane')).body.data;
+    expect(p.rating).toMatchObject({
+      reviewCount: 2,
+      average: null,
+      sufficientData: false,
+      message: 'Not enough reviews yet',
+      minimumReviews: 3,
+    });
+    expect(p.seo.jsonLd.aggregateRating).toBeUndefined();
+  });
+
+  it('marks thin pages noindex and keeps them out of the sitemap', async () => {
+    const thin = (await guest().get('/businesses/threadline-menswear')).body
+      .data;
+    expect(thin.seo).toMatchObject({
+      indexable: false,
+      robots: 'noindex,follow',
+    });
+    const sitemap = (await guest().get('/seo/sitemap')).body.data.map(
+      (e: { path: string }) => e.path,
+    );
+    expect(sitemap).toContain('/b/kemi-s-closet');
+    expect(sitemap).not.toContain('/b/threadline-menswear');
+    // No category has INDEXABLE_MIN_LISTINGS (5) published businesses yet, so no category pages.
+    expect(sitemap.filter((p: string) => p.startsWith('/c/'))).toEqual([]);
+  });
+
+  it('serves category and category-in-city pages', async () => {
+    const page = (
+      await guest().get(
+        '/categories/electronics-and-gadgets/businesses?city=lagos',
+      )
+    ).body;
+    expect(page.data.total).toBe(1);
+    expect(page.data.seo.canonicalPath).toBe(
+      '/c/electronics-and-gadgets/lagos',
+    );
+    expect(page.data.seo.indexable).toBe(false); // fewer than INDEXABLE_MIN_LISTINGS
+  });
+
+  it('publishes versioned rating rules and public config', async () => {
+    expect(
+      (await guest().get('/meta/rating-methodology')).body.data,
+    ).toMatchObject({ version: '2.0', minimumReviews: 3 });
+    expect((await guest().get('/meta/config')).body.data).toMatchObject({
+      minReviewsForRating: 3,
+      reviewBodyMinLength: 50,
+      accessTokenSeconds: 900,
+    });
+  });
+});
+
+describe('§6.2 / §13 submissions and duplicate signals', () => {
+  it('accepts a suggestion that shares an identifier and shows it as a possible duplicate (never auto-rejected)', async () => {
+    const r = await consumer.post('/business-submissions', {
       name: 'Kemi Closet Copy',
-      category: 'fashion-clothing',
+      category: 'fashion-and-clothing',
+      city: 'lagos',
       identifiers: [{ type: 'INSTAGRAM', value: 'instagram.com/kemis_closet' }],
     });
-    expect(dup.status).toBe(409);
-    expect(JSON.stringify(dup.body)).toMatch(/Kemi/);
+    expect(r.status).toBe(201);
+    expect(
+      r.body.data.possibleMatches.map((m: { slug: string }) => m.slug),
+    ).toContain('kemi-s-closet');
+    ids.dupSubmission = r.body.data.id;
   });
 
-  it('keeps suggestions private until staff approve them', async () => {
-    expect((await new Client().get('/businesses/lagos-shoe-plug')).status).toBe(
-      404,
-    );
-    const approve = await admin.post(
-      `/admin/submissions/${ids.submission}/approve`,
+  it('validates submissions and keeps them private until staff decide', async () => {
+    expect(
+      (
+        await consumer.post('/business-submissions', {
+          name: 'X',
+          category: 'fashion-and-clothing',
+          city: 'lagos',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await consumer.post('/business-submissions', {
+          name: 'Nowhere Shop',
+          category: 'fashion-and-clothing',
+        })
+      ).status,
+    ).toBe(400);
+    const ok = await consumer.post('/business-submissions', {
+      name: 'Lagos Shoe Plug',
+      category: 'fashion-and-clothing',
+      city: 'lagos',
+      area: 'Yaba',
+      description:
+        'Sneakers and slides sold on Instagram, with same-day delivery around Yaba and Surulere in Lagos.',
+      identifiers: [{ type: 'instagram', value: '@lagosshoeplug' }],
+    });
+    expect(ok.status).toBe(201);
+    expect((await guest().get('/businesses/lagos-shoe-plug')).status).toBe(404);
+    expect(
+      (await consumer.post(`/admin/submissions/${ok.body.data.id}/approve`, {}))
+        .status,
+    ).toBe(403);
+    const approved = await moderator.post(
+      `/admin/submissions/${ok.body.data.id}/approve`,
       {},
     );
-    expect(approve.status).toBe(200);
-    expect((await new Client().get('/businesses/lagos-shoe-plug')).status).toBe(
-      200,
+    expect(approved.status).toBe(200);
+    expect(
+      (await guest().get('/businesses/lagos-shoe-plug')).body.data.kind,
+    ).toBe('profile');
+    const merged = await moderator.post(
+      `/admin/submissions/${ids.dupSubmission}/merge`,
+      { businessId: await bizId('kemi-s-closet') },
     );
+    expect(merged.body.data.status).toBe('merged');
   });
+});
 
-  it('detects duplicates on admin create and allows an explicit override', async () => {
+describe('§7.4 lifecycle, slugs, merge', () => {
+  it('requires confirmation for possible duplicates on admin create', async () => {
     const body = {
       name: 'Kemis Closet',
-      category: 'fashion-clothing',
-      locations: [{ state: 'lagos' }],
+      category: 'fashion-and-clothing',
+      city: 'lagos',
+      description:
+        'Duplicate listing of an Instagram fashion vendor in Yaba, Lagos, created to test merging and redirects.',
+      identifiers: [{ type: 'INSTAGRAM', value: '@kemis_closet_ng' }],
     };
-    const first = await admin.post('/admin/businesses', body);
+    expect((await moderator.post('/admin/businesses', body)).status).toBe(403);
+    const first = await listings.post('/admin/businesses', body);
     expect(first.status).toBe(409);
-    expect(first.body.error.message).toBeDefined();
-    const forced = await admin.post('/admin/businesses', {
+    expect(first.body.error.details.duplicateCandidates.length).toBeGreaterThan(
+      0,
+    );
+    const created = await listings.post('/admin/businesses', {
       ...body,
       confirmNotDuplicate: true,
     });
-    expect(forced.status).toBe(201);
-    ids.dupBusiness = forced.body.data.id;
-    const scan = await admin.get('/admin/businesses/duplicates');
-    expect(JSON.stringify(scan.body.data)).toMatch(/kemis-closet/);
+    expect(created.status).toBe(201);
+    ids.dup = created.body.data.id;
   });
 
-  it('merges a duplicate: reviews move, the old link redirects, ratings stay consistent', async () => {
-    const r = await consumer.post('/reviews', {
-      businessId: ids.dupBusiness,
-      overallRating: 3,
-      dimensions: [
-        { key: 'product_service_quality', score: 3 },
-        { key: 'value_for_money', score: 3 },
-      ],
-      body: 'Reviewing the duplicate listing so the merge has a review to move across.',
+  it('enforces the status transition table', async () => {
+    expect(
+      (
+        await listings.patch(`/admin/businesses/${ids.dup}/status`, {
+          status: 'pending_review',
+          reason: 'Back to drafts',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await listings.patch(`/admin/businesses/${ids.dup}/status`, {
+          status: 'archived',
+          reason: 'Test archive',
+        })
+      ).status,
+    ).toBe(200);
+    expect((await guest().get('/businesses/kemis-closet')).status).toBe(410);
+  });
+
+  it('regenerates the slug on rename and 301s the old one forever', async () => {
+    const id = await bizId('suya-spot-wuse');
+    const r = await listings.patch(`/admin/businesses/${id}`, {
+      name: 'Suya Spot Abuja',
     });
-    expect(r.status).toBe(201);
-    const merge = await admin.post(
-      `/admin/businesses/${ids.dupBusiness}/merge`,
+    expect(r.body.data.slug).toBe('suya-spot-abuja');
+    expect(r.body.data.previousSlugs).toContain('suya-spot-wuse');
+    const old = (await guest().get('/businesses/suya-spot-wuse')).body.data;
+    expect(old).toMatchObject({
+      kind: 'redirect',
+      reason: 'slug_changed',
+      slug: 'suya-spot-abuja',
+      statusCode: 301,
+    });
+    // An old slug is never reused.
+    const clash = await listings.post('/admin/businesses', {
+      name: 'Suya Spot Wuse',
+      category: 'food-and-restaurants',
+      city: 'abuja',
+      area: 'Wuse',
+      confirmNotDuplicate: true,
+      publish: false,
+    });
+    expect(clash.body.data.slug).not.toBe('suya-spot-wuse');
+  });
+
+  it('merges a duplicate: reviews move to the target and the old URL redirects', async () => {
+    const dup = await listings.post('/admin/businesses', {
+      name: 'Gadget Hub Computer Village',
+      category: 'electronics-and-gadgets',
+      city: 'lagos',
+      area: 'Ikeja',
+      description:
+        'Second listing for the same Computer Village phone shop, created here to exercise the merge flow end to end.',
+      identifiers: [{ type: 'INSTAGRAM', value: 'gadgethub_cv' }],
+      confirmNotDuplicate: true,
+    });
+    const fresh = await newVerifiedUser('merge_reviewer');
+    const review = await fresh.post('/reviews', {
+      businessId: dup.body.data.id,
+      overallRating: 3,
+      title: 'Average shop',
+      body: BODY,
+      dimensions: [
+        { key: 'product_authenticity', value: 3 },
+        { key: 'value_for_money', value: 3 },
+      ],
+    });
+    expect(review.status).toBe(201);
+    const before = (await guest().get('/businesses/gadget-hub-ikeja')).body.data
+      .rating.reviewCount;
+    expect(
+      (
+        await moderator.post(`/admin/businesses/${dup.body.data.id}/merge`, {
+          targetId: await bizId('gadget-hub-ikeja'),
+          reason: 'dup',
+        })
+      ).status,
+    ).toBe(403);
+    const merged = await listings.post(
+      `/admin/businesses/${dup.body.data.id}/merge`,
       {
-        targetId: await businessId('kemi-s-closet'),
-        reason: 'Same Instagram vendor listed twice',
+        targetId: await bizId('gadget-hub-ikeja'),
+        reason: 'Same shop listed twice',
       },
     );
-    expect(merge.status).toBe(200);
-    const old = (await new Client().get('/businesses/kemis-closet')).body.data;
-    expect(old.merged).toBe(true);
-    expect(old.mergedInto.slug).toBe('kemi-s-closet');
-    const kemi = (await new Client().get('/businesses/kemi-s-closet')).body
-      .data;
-    expect(kemi.rating.reviewCount).toBe(7);
-    expect(kemi.alternativeNames).toContain('Kemis Closet');
+    expect(merged.status).toBe(200);
+    expect(merged.body.data.movedReviews).toBe(1);
+    expect(
+      (await guest().get('/businesses/gadget-hub-computer-village')).body.data,
+    ).toMatchObject({
+      kind: 'redirect',
+      reason: 'merged',
+      slug: 'gadget-hub-ikeja',
+    });
+    expect(
+      (await guest().get('/businesses/gadget-hub-ikeja')).body.data.rating
+        .reviewCount,
+    ).toBe(before + 1);
+  });
+
+  it('lets a moderator force noindex, audited', async () => {
+    const id = await bizId('mama-put-kitchen');
+    expect(
+      (
+        await reviewer2.patch(`/admin/businesses/${id}/noindex`, {
+          noindex: true,
+          reason: 'x',
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await moderator.patch(`/admin/businesses/${id}/noindex`, {
+          noindex: true,
+          reason: 'Legal complaint under review',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await guest().get('/businesses/mama-put-kitchen')).body.data.seo.robots,
+    ).toBe('noindex,follow');
+    await moderator.patch(`/admin/businesses/${id}/noindex`, {
+      noindex: false,
+      reason: 'Complaint closed',
+    });
   });
 });
 
-describe('AC8, AC12, AC15: reviews, dimensions, edits and helpful votes', () => {
-  it('enforces the category dimensions', async () => {
-    const gadget = await businessId('gadget-hub-ikeja');
-    const missing = await consumer.post('/reviews', {
+describe('§7.6 reviews', () => {
+  it('validates dimensions, title and body length', async () => {
+    const gadget = await bizId('gadget-hub-ikeja');
+    const base = {
       businessId: gadget,
       overallRating: 2,
-      dimensions: [{ key: 'product_service_quality', score: 2 }],
-      body: 'The phone I bought had a faulty charging port and they took two weeks to fix it.',
+      title: 'Faulty port',
+      body: BODY,
+    };
+    expect(
+      (
+        await consumer.post('/reviews', {
+          ...base,
+          dimensions: [{ key: 'product_authenticity', value: 2 }],
+        })
+      ).body.error.message,
+    ).toMatch(/Please rate: Value for money/);
+    expect(
+      (
+        await consumer.post('/reviews', {
+          ...base,
+          dimensions: [{ key: 'hygiene_safety', value: 2 }],
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await consumer.post('/reviews', {
+          ...base,
+          title: 'ab',
+          dimensions: [],
+        })
+      ).status,
+    ).toBe(400);
+    const short = await consumer.post('/reviews', {
+      ...base,
+      body: 'Too short to be useful.',
+      dimensions: [
+        { key: 'product_authenticity', value: 2 },
+        { key: 'value_for_money', value: 2 },
+      ],
     });
-    expect(missing.status).toBe(400);
-    expect(missing.body.error.message).toMatch(/Please rate/);
-    const unknown = await consumer.post('/reviews', {
-      businessId: gadget,
-      overallRating: 2,
-      dimensions: [{ key: 'cleanliness', score: 2 }],
-      body: 'The phone I bought had a faulty charging port and they took two weeks to fix it.',
-    });
-    expect(unknown.status).toBe(400);
+    expect(short.status).toBe(400);
+    expect(short.body.error.message).toMatch(/at least 50/);
   });
 
-  it('publishes a review with honest labels', async () => {
+  it('publishes a review with separate label fields and no purchase claim', async () => {
     const res = await consumer.post('/reviews', {
-      businessId: await businessId('gadget-hub-ikeja'),
+      businessId: await bizId('gadget-hub-ikeja'),
       overallRating: 2,
-      dimensions: [
-        { key: 'product_service_quality', score: 2 },
-        { key: 'customer_service', score: 1 },
-        { key: 'value_for_money', score: 3 },
-        { key: 'communication', score: 2 },
-      ],
       title: 'Faulty charging port',
-      body: 'The phone I bought had a faulty charging port and they took two weeks to fix it.',
-      experienceDate: '2026-11-01',
+      body: 'The phone I bought had a faulty charging port and they took two weeks to fix it, with very little communication.',
+      recommend: false,
+      dimensions: [
+        { key: 'product_authenticity', value: 2 },
+        { key: 'value_for_money', value: 3 },
+        { key: 'after_sales_support', value: 1 },
+      ],
     });
     expect(res.status).toBe(201);
-    const review = res.body.data;
-    ids.review = review.id;
-    expect(review.status).toBe('published');
-    expect(review.labels.map((l: { key: string }) => l.key)).toEqual([
+    ids.review = res.body.data.id;
+    expect(res.body.data).toMatchObject({
+      status: 'published',
+      evidenceAttached: false,
+      evidenceStatus: 'not_reviewed',
+      underInvestigation: false,
+      recommend: false,
+    });
+    expect(res.body.data.labels.map((l: { key: string }) => l.key)).toEqual([
       'account_verified',
     ]);
-    expect(review.labels[0].description).toMatch(/does not prove/);
-    expect(review.dimensions).toHaveLength(4);
   });
 
-  it('allows one current review per business', async () => {
+  it('allows one active review per business; a repeat experience is an update with history', async () => {
     const again = await consumer.post('/reviews', {
-      businessId: await businessId('gadget-hub-ikeja'),
+      businessId: await bizId('gadget-hub-ikeja'),
       overallRating: 5,
+      title: 'Second try',
+      body: BODY,
       dimensions: [
-        { key: 'product_service_quality', score: 5 },
-        { key: 'customer_service', score: 5 },
-        { key: 'value_for_money', score: 5 },
+        { key: 'product_authenticity', value: 5 },
+        { key: 'value_for_money', value: 5 },
       ],
-      body: 'Trying to post a second review of the same business to boost or sink it.',
     });
     expect(again.status).toBe(409);
-  });
-
-  it('keeps edit history', async () => {
+    expect(again.body.error.details.reviewId).toBe(ids.review);
     const edit = await consumer.patch(`/reviews/${ids.review}`, {
-      body: 'The phone had a faulty charging port. They fixed it after two weeks and apologised.',
       overallRating: 3,
+      body: 'Update after a second visit: they replaced the phone and apologised, though it took two weeks overall.',
     });
     expect(edit.status).toBe(200);
     expect(edit.body.data.edited).toBe(true);
-    expect(edit.body.data.editCount).toBe(1);
     const revs = await consumer.get(`/reviews/${ids.review}/revisions`);
-    expect(revs.body.data).toHaveLength(1);
-    expect(revs.body.data[0].overallRating).toBe(2);
+    expect(revs.body.data[0].snapshot.overallRating).toBe(2);
     expect(
-      (await consumer2.get(`/reviews/${ids.review}/revisions`)).status,
+      (await reviewer2.get(`/reviews/${ids.review}/revisions`)).status,
+    ).toBe(403);
+    expect(
+      (await reviewer2.patch(`/reviews/${ids.review}`, { title: 'Hijack' }))
+        .status,
     ).toBe(403);
   });
 
-  it('counts one changeable, removable helpful vote per user', async () => {
-    const yes = await consumer2.put(`/reviews/${ids.review}/vote`, {
-      helpful: true,
-    });
-    expect(yes.body.data).toEqual({ myVote: 'helpful', helpfulCount: 1 });
-    const again = await consumer2.put(`/reviews/${ids.review}/vote`, {
-      helpful: true,
-    });
-    expect(again.body.data.helpfulCount).toBe(1);
-    const no = await consumer2.put(`/reviews/${ids.review}/vote`, {
-      helpful: false,
-    });
-    expect(no.body.data).toEqual({ myVote: 'not_helpful', helpfulCount: 0 });
-    const removed = await consumer2.delete(`/reviews/${ids.review}/vote`);
-    expect(removed.body.data.myVote).toBeNull();
-    expect(
-      (await consumer.put(`/reviews/${ids.review}/vote`, { helpful: true }))
-        .status,
-    ).toBe(400);
-  });
-
-  it('keeps stored ratings equal to a fresh calculation (AC13)', async () => {
-    const id = await businessId('gadget-hub-ikeja');
-    const b = await prisma.business.findUniqueOrThrow({ where: { id } });
-    const agg = await prisma.review.aggregate({
-      where: {
+  it('caps new reviews per day', async () => {
+    const limited = await newVerifiedUser('busy_reviewer');
+    const slugs = [
+      'crumbs-bakery-ph',
+      'eventful-rentals',
+      'printpro-enugu',
+      'volt-phones-abuja',
+    ];
+    const results: number[] = [];
+    for (const slug of slugs) {
+      const id = await bizId(slug);
+      const cat = (
+        await prisma.business.findUniqueOrThrow({
+          where: { id },
+          include: {
+            category: {
+              include: {
+                dimensions: {
+                  where: { required: true },
+                  include: { dimension: true },
+                },
+              },
+            },
+          },
+        })
+      ).category;
+      const r = await limited.post('/reviews', {
         businessId: id,
-        status: { in: ['PUBLISHED', 'UNDER_INVESTIGATION'] },
-        supersededAt: null,
-      },
-      _count: { _all: true },
-      _avg: { overallRating: true },
-    });
-    expect(b.reviewCount).toBe(agg._count._all);
-    expect(b.ratingAverage).toBeCloseTo(agg._avg.overallRating ?? 0, 5);
+        overallRating: 4,
+        title: 'Good',
+        body: BODY,
+        dimensions: cat.dimensions.map((d) => ({
+          key: d.dimension.key,
+          value: 4,
+        })),
+      });
+      results.push(r.status);
+    }
+    expect(results).toEqual([201, 201, 201, 400]);
   });
 
-  it('requires Cloudinary for evidence uploads (AC9 path)', async () => {
-    const res = await consumer.post(`/reviews/${ids.review}/evidence`, {
-      kind: 'receipt',
-      url: 'https://res.cloudinary.com/demo/image/authenticated/v1/talkground/evidence-private/receipt.jpg',
-    });
-    expect(res.status).toBe(503);
+  it('requires Cloudinary for evidence (503) and validates evidence type (400)', async () => {
+    expect(
+      (
+        await consumer.post(`/reviews/${ids.review}/evidence`, {
+          type: 'video',
+          url: 'https://x.y/z.jpg',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await consumer.post(`/reviews/${ids.review}/evidence`, {
+          type: 'receipt',
+          url: 'https://res.cloudinary.com/demo/image/authenticated/v1/talkground/receipts/r.jpg',
+        })
+      ).status,
+    ).toBe(503);
   });
 });
 
-describe('AC6, AC7, AC11: ownership claims, the business portal and responses', () => {
-  it('accepts a claim and shows a pending claim publicly as unclaimed', async () => {
-    ownerCandidate = await newVerifiedUser('gadget_owner');
-    const gadget = await businessId('gadget-hub-ikeja');
-    ids.gadget = gadget;
-    const claim = await ownerCandidate.post(`/businesses/${gadget}/claims`, {
-      method: 'manual_review',
-      claimantRole: 'Owner',
-      message:
-        'I run the shop at Computer Village. My CAC number is RC1234567.',
-    });
-    expect(claim.status).toBe(201);
-    ids.claim = claim.body.data.id;
+describe('§7.9 helpful votes', () => {
+  it('toggles one vote per user, refuses self-votes and member votes', async () => {
+    const on = await reviewer2.post(`/reviews/${ids.review}/helpful`);
+    expect(on.body.data).toEqual({ helpful: true, helpfulCount: 1 });
+    const off = await reviewer2.post(`/reviews/${ids.review}/helpful`);
+    expect(off.body.data).toEqual({ helpful: false, helpfulCount: 0 });
+    expect((await consumer.post(`/reviews/${ids.review}/helpful`)).status).toBe(
+      400,
+    );
+    expect((await guest().post(`/reviews/${ids.review}/helpful`)).status).toBe(
+      401,
+    );
+    expect(
+      await prisma.helpfulVote.count({ where: { reviewId: ids.review } }),
+    ).toBe(0);
+  });
+});
+
+describe('§7.5 claims and business membership', () => {
+  it('claims an Instagram-only vendor via social account and is approved by an admin', async () => {
+    const vendor = await newVerifiedUser('mamaput_owner');
+    const id = await bizId('mama-put-kitchen');
+    ids.mamaput = id;
     expect(
       (
-        await ownerCandidate.post(`/businesses/${gadget}/claims`, {
+        await vendor.post(`/businesses/${id}/claims`, {
+          method: 'social_account',
+          claimantRole: 'Owner',
+          verificationTarget: '@someone_else',
+        })
+      ).status,
+    ).toBe(400);
+    const claim = await vendor.post(`/businesses/${id}/claims`, {
+      method: 'social_account',
+      claimantRole: 'Owner',
+      verificationTarget: '@mamaput_lagos',
+    });
+    expect(claim.status).toBe(201);
+    expect(claim.body.data.instructions.code).toMatch(/^TG-[0-9A-F]{8}$/);
+    expect(
+      (
+        await vendor.post(`/businesses/${id}/claims`, {
           method: 'manual_review',
           claimantRole: 'Owner',
           message: 'again',
@@ -501,273 +832,333 @@ describe('AC6, AC7, AC11: ownership claims, the business portal and responses', 
       ).status,
     ).toBe(409);
     expect(
-      (await new Client().get('/businesses/gadget-hub-ikeja')).body.data
-        .ownership.status,
+      (await guest().get('/businesses/mama-put-kitchen')).body.data.ownership
+        .status,
+    ).toBe('unclaimed');
+    expect((await moderator.get('/admin/claims')).status).toBe(403); // claim.decide is Admin+
+    const detail = await listings.get(`/admin/claims/${claim.body.data.id}`);
+    expect(detail.body.data.verification.codeToLookFor).toBe(
+      claim.body.data.instructions.code,
+    );
+    expect(
+      (
+        await listings.post(`/admin/claims/${claim.body.data.id}/approve`, {
+          ownershipVerified: true,
+        })
+      ).status,
+    ).toBe(400);
+    const ok = await listings.post(
+      `/admin/claims/${claim.body.data.id}/approve`,
+      { ownershipVerified: true, reason: 'Saw the code in the Instagram bio.' },
+    );
+    expect(ok.body.data).toMatchObject({
+      status: 'approved',
+      ownershipStatus: 'claimed',
+      ownershipVerified: true,
+    });
+    expect((await vendor.get('/users/me/businesses')).body.data[0].slug).toBe(
+      'mama-put-kitchen',
+    );
+    ids.vendor = 'mamaput_owner';
+  });
+
+  it('rejects a claim with a reason the claimant can see', async () => {
+    const someone = await newVerifiedUser('claim_rejected');
+    const id = await bizId('adire-lane');
+    const claim = await someone.post(`/businesses/${id}/claims`, {
+      method: 'manual_review',
+      claimantRole: 'Manager',
+      message: 'I manage their stall.',
+    });
+    expect(
+      (await listings.post(`/admin/claims/${claim.body.data.id}/reject`, {}))
+        .status,
+    ).toBe(400);
+    await listings.post(`/admin/claims/${claim.body.data.id}/reject`, {
+      reason: 'We could not confirm your connection to the business.',
+    });
+    const mine = await someone.get(`/claims/${claim.body.data.id}`);
+    expect(mine.body.data).toMatchObject({
+      status: 'rejected',
+      decisionReason: 'We could not confirm your connection to the business.',
+    });
+    expect(
+      (await guest().get('/businesses/adire-lane')).body.data.ownership.status,
     ).toBe('unclaimed');
   });
 
-  it('rejects a business email that is not on the business domain', async () => {
-    const res = await consumer.post(`/businesses/${ids.gadget}/claims`, {
+  it('verifies a business email on the website domain before allowing "ownershipVerified"', async () => {
+    const mgr = await newVerifiedUser('salon_manager');
+    const id = await bizId('crown-and-coils-salon');
+    expect(
+      (
+        await mgr.post(`/businesses/${id}/claims`, {
+          method: 'business_email',
+          claimantRole: 'Manager',
+          verificationTarget: 'me@gmail.com',
+        })
+      ).status,
+    ).toBe(400);
+    const claim = await mgr.post(`/businesses/${id}/claims`, {
       method: 'business_email',
-      claimantRole: 'Manager',
-      verificationTarget: 'someone@gmail.com',
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it('verifies control through an email on the business website domain', async () => {
-    const salonOwner = await newVerifiedUser('salon_owner');
-    const salon = await businessId('crown-and-coils-salon');
-    const claim = await salonOwner.post(`/businesses/${salon}/claims`, {
-      method: 'BUSINESS_EMAIL',
       claimantRole: 'Manager',
       verificationTarget: 'manager@crownandcoils.ng',
     });
-    expect(claim.status).toBe(201);
-    expect(claim.body.data.verified).toBe(false);
-    const claimId = claim.body.data.id;
-    // Staff cannot mark ownership "verified" before the proof is completed.
     expect(
       (
-        await admin.post(`/admin/claims/${claimId}/approve`, {
-          ownership: 'verified',
-          note: 'Trying too early.',
+        await listings.post(`/admin/claims/${claim.body.data.id}/approve`, {
+          ownershipVerified: true,
+          reason: 'too early',
         })
       ).status,
     ).toBe(400);
     expect(
       (
-        await salonOwner.post(`/claims/${claimId}/verify-email`, {
+        await mgr.post(`/claims/${claim.body.data.id}/verify-email`, {
           code: '000000',
         })
       ).status,
     ).toBe(400);
-    const ok = await salonOwner.post(`/claims/${claimId}/verify-email`, {
-      code: claim.body.data.devCode,
-    });
-    expect(ok.status).toBe(200);
-    expect(ok.body.data.verified).toBe(true);
-    const approved = await admin.post(`/admin/claims/${claimId}/approve`, {
-      ownership: 'verified',
-      note: 'Code confirmed at manager@crownandcoils.ng (website domain).',
-    });
-    expect(approved.status).toBe(200);
-    expect(
-      (await new Client().get('/businesses/crown-and-coils-salon')).body.data
-        .ownership.status,
-    ).toBe('ownership_verified');
-  });
-
-  it('limits claim review to staff with CLAIMS_REVIEW', async () => {
-    expect((await moderator.get('/admin/claims')).status).toBe(403);
-    expect((await consumer.get('/admin/claims')).status).toBe(403);
-    const list = await admin.get('/admin/claims');
-    expect(list.body.data.map((c: { id: string }) => c.id)).toContain(
-      ids.claim,
-    );
-  });
-
-  it('approves the claim, granting the dashboard and the verified badge', async () => {
-    const res = await admin.post(`/admin/claims/${ids.claim}/approve`, {
-      ownership: 'verified',
-      note: 'Called the shop line and checked the CAC certificate in person.',
-    });
-    expect(res.status).toBe(200);
-    const mine = await ownerCandidate.get('/users/me/businesses');
-    expect(mine.body.data[0].business.slug).toBe('gadget-hub-ikeja');
-    const pub = (await new Client().get('/businesses/gadget-hub-ikeja')).body
-      .data;
-    expect(pub.ownership.label).toBe('Ownership verified');
-    expect(pub.ownership.description).toMatch(/not an endorsement/);
-  });
-
-  it('lets owners edit permitted fields only', async () => {
-    const ok = await ownerCandidate.patch(`/manage/businesses/${ids.gadget}`, {
-      description: 'Phones, laptops and repairs with warranty.',
-    });
-    expect(ok.status).toBe(200);
     expect(
       (
-        await ownerCandidate.patch(`/manage/businesses/${ids.gadget}`, {
-          name: 'Best Gadgets Ever',
+        await mgr.post(`/claims/${claim.body.data.id}/verify-email`, {
+          code: claim.body.data.devCode,
+        })
+      ).body.data.verificationConfirmed,
+    ).toBe(true);
+    expect(
+      (
+        await listings.post(`/admin/claims/${claim.body.data.id}/approve`, {
+          ownershipVerified: true,
+          reason: 'Code confirmed on the website domain.',
         })
       ).status,
-    ).toBe(400);
+    ).toBe(200);
+  });
+
+  it('keeps ownership from affecting ratings or search order', async () => {
+    const p = (await guest().get('/businesses/mama-put-kitchen')).body.data;
+    expect(p.rating.reviewCount).toBe(2);
+    expect(p.rating.average).toBeNull();
+  });
+});
+
+describe('§7.7–§7.11 business side', () => {
+  it('lets members edit permitted fields only; non-members are refused', async () => {
+    const id = await bizId('kemi-s-closet');
+    ids.kemi = id;
     expect(
-      (await consumer.get(`/manage/businesses/${ids.gadget}/dashboard`)).status,
+      (await reviewer2.get(`/manage/businesses/${id}/dashboard`)).status,
     ).toBe(403);
-  });
-
-  it('shows an actionable dashboard', async () => {
-    const d = (
-      await ownerCandidate.get(`/manage/businesses/${ids.gadget}/dashboard`)
-    ).body.data;
-    expect(d.overview.rating.reviewCount).toBe(6);
-    expect(d.responseActivity.responded).toBe(0);
-    expect(d.unresolvedComplaints.count).toBeGreaterThanOrEqual(2);
-    expect(d.trends.monthly).toHaveLength(6);
-    expect(d.shareLinks.reviewUrl).toBe(
-      'http://localhost:3000/businesses/gadget-hub-ikeja/review',
-    );
-    expect(d.shareLinks.policy).toMatch(/never offer rewards/);
-  });
-
-  it('posts one official response per review, clearly attributed', async () => {
-    const url = `/manage/businesses/${ids.gadget}/reviews/${ids.review}/response`;
-    const r = await ownerCandidate.post(url, {
-      body: 'Sorry about the charging port. We now test every port before sale.',
+    expect(
+      (await owner.patch(`/manage/businesses/${id}`, { name: 'New Name' }))
+        .status,
+    ).toBe(400);
+    const ok = await owner.patch(`/manage/businesses/${id}`, {
+      area: 'Yaba, Lagos Mainland',
     });
-    expect(r.status).toBe(201);
+    expect(ok.body.data.location.area).toBe('Yaba, Lagos Mainland');
+    expect(ok.body.data.indexable).toBe(true);
+  });
+
+  it('shows a simple dashboard with response rate/time, complaints, trend and neutral share links', async () => {
+    const d = (await owner.get(`/manage/businesses/${ids.kemi}/dashboard`)).body
+      .data;
+    expect(d.rating.reviewCount).toBeGreaterThanOrEqual(6);
+    expect(d.responseActivity.responded).toBe(1);
+    expect(d.unresolvedComplaints.count).toBe(1);
+    expect(d.trend).toHaveLength(6);
+    expect(d.shareLinks.reviewUrl).toBe(
+      'https://talkground.example/b/kemi-s-closet/review',
+    );
+    expect(d.shareLinks.badge.text).toBe('See our reviews on TalkGround');
+  });
+
+  it('lets only members respond, once per review, labelled "Response from <business>"', async () => {
+    const reviews = (
+      await owner.get(
+        `/manage/businesses/${ids.kemi}/reviews?filter=unanswered`,
+      )
+    ).body.data;
+    const target = reviews[0];
+    ids.kemiReview = target.id;
+    const url = `/manage/businesses/${ids.kemi}/reviews/${target.id}/response`;
     expect(
       (
-        await ownerCandidate.post(url, {
-          body: 'A second official response should not be allowed.',
+        await reviewer2.post(url, {
+          body: 'I am not a member of this business.',
+        })
+      ).status,
+    ).toBe(403);
+    expect((await owner.post(url, { body: 'short' })).status).toBe(400);
+    expect(
+      (
+        await owner.post(url, {
+          body: 'Thank you for the kind words, we are glad the dress fitted well.',
+        })
+      ).status,
+    ).toBe(201);
+    expect(
+      (
+        await owner.post(url, {
+          body: 'A second response must not be allowed here.',
         })
       ).status,
     ).toBe(409);
     expect(
       (
-        await consumer2.post(url, {
-          body: 'I am not the owner and should not be able to respond.',
+        await owner.patch(url, {
+          body: 'Thank you so much for the kind words, we are glad the dress fitted well.',
         })
       ).status,
-    ).toBe(403);
-    const edit = await ownerCandidate.patch(url, {
-      body: 'Sorry about the charging port. We now test every port before every sale.',
-    });
-    expect(edit.body.data.editsRemaining).toBe(2);
-    const review = (await new Client().get(`/reviews/${ids.review}`)).body.data;
-    expect(review.response.label).toBe(
-      'Official response from Gadget Hub Ikeja',
-    );
-    expect(review.resolution.status).toBe('business_responded');
+    ).toBe(200);
+    const pub = (await guest().get(`/reviews/${target.id}`)).body.data;
+    expect(pub.response.label).toBe("Response from Kemi's Closet");
+    expect(pub.resolution.status).toBe('business_responded');
   });
 
-  it('lets only the consumer report a complaint resolved, without touching the rating', async () => {
-    const before = (
-      await prisma.business.findUniqueOrThrow({ where: { id: ids.gadget } })
-    ).ratingAverage;
-    const propose = await ownerCandidate.post(
-      `/manage/businesses/${ids.gadget}/reviews/${ids.review}/resolution`,
-      {
-        note: 'We replaced the phone on 15 November.',
-      },
-    );
-    expect(propose.body.data.status).toBe('resolution_proposed');
+  it('lets only the reviewer mark a complaint resolved; resolution never changes the rating', async () => {
+    const complaint = (
+      await owner.get(
+        `/manage/businesses/${ids.kemi}/reviews?filter=unresolved`,
+      )
+    ).body.data[0];
+    const before = (await guest().get('/businesses/kemi-s-closet')).body.data
+      .rating.average;
     expect(
       (
-        await ownerCandidate.post(`/reviews/${ids.review}/resolution`, {
+        await owner.post(`/reviews/${complaint.id}/resolution`, {
           status: 'resolved',
         })
       ).status,
     ).toBe(403);
-    const done = await consumer.post(`/reviews/${ids.review}/resolution`, {
-      status: 'resolved',
-      note: 'Replacement works.',
+    const author = await prisma.review.findUniqueOrThrow({
+      where: { id: complaint.id },
+      include: { user: true },
     });
-    expect(done.body.data.status).toBe('resolved_by_consumer');
-    const history = (await new Client().get(`/reviews/${ids.review}`)).body.data
-      .resolutionHistory;
-    expect(history.map((h: { status: string }) => h.status)).toEqual([
-      'business_responded',
-      'resolution_proposed',
-      'resolved_by_consumer',
-    ]);
-    const after = (
-      await prisma.business.findUniqueOrThrow({ where: { id: ids.gadget } })
-    ).ratingAverage;
-    expect(after).toBe(before);
-  });
-
-  it('blocks conflicts of interest', async () => {
-    const own = await ownerCandidate.post('/reviews', {
-      businessId: ids.gadget,
-      overallRating: 5,
-      dimensions: [
-        { key: 'product_service_quality', score: 5 },
-        { key: 'customer_service', score: 5 },
-        { key: 'value_for_money', score: 5 },
-      ],
-      body: 'Owners must never be able to review their own business on TalkGround.',
-    });
-    expect(own.status).toBe(403);
-    const reviews = (
-      await new Client().get('/businesses/gadget-hub-ikeja/reviews')
-    ).body.data;
-    const someone = reviews.find((r: { id: string }) => r.id !== ids.review);
+    const reviewer = await login(author.user.email);
     expect(
       (
-        await ownerCandidate.put(`/reviews/${someone.id}/vote`, {
-          helpful: true,
+        await reviewer.post(`/reviews/${complaint.id}/resolution`, {
+          status: 'resolved',
+          note: 'Refund received.',
         })
-      ).status,
-    ).toBe(403);
+      ).body.data.status,
+    ).toBe('resolved_by_consumer');
+    expect(
+      (
+        await reviewer.post(`/reviews/${complaint.id}/resolution`, {
+          status: 'reopened',
+        })
+      ).body.data.status,
+    ).toBe('reopened');
+    expect(
+      (await guest().get('/businesses/kemi-s-closet')).body.data.rating.average,
+    ).toBe(before);
   });
 });
 
-describe('AC10, AC16, AC17, AC20: reports, disputes, moderation, restrictions and audit', () => {
-  it('queues reports without hiding the review', async () => {
-    const rep = await consumer2.post(`/reviews/${ids.review}/reports`, {
-      reason: 'false_experience',
-      details: 'Looks invented.',
+describe('§8 reports, disputes, moderation', () => {
+  it('a report flags the review "under investigation" without hiding it or changing the rating', async () => {
+    const before = (await guest().get('/businesses/gadget-hub-ikeja')).body.data
+      .rating;
+    expect(
+      (
+        await reviewer2.post(`/reviews/${ids.review}/reports`, {
+          reasonCode: 'BAD_REASON',
+        })
+      ).status,
+    ).toBe(400);
+    const rep = await reviewer2.post(`/reviews/${ids.review}/reports`, {
+      reasonCode: 'fake_or_never_visited',
+      note: 'Looks invented.',
     });
     expect(rep.status).toBe(201);
     ids.report = rep.body.data.id;
     expect(
       (
-        await consumer2.post(`/reviews/${ids.review}/reports`, {
-          reason: 'spam_promotional',
+        await reviewer2.post(`/reviews/${ids.review}/reports`, {
+          reasonCode: 'spam_or_promotional',
         })
       ).status,
     ).toBe(409);
-    expect((await new Client().get(`/reviews/${ids.review}`)).status).toBe(200);
-    const queue = await moderator.get('/admin/reviews?queue=reported');
-    expect(queue.body.data.map((r: { id: string }) => r.id)).toContain(
-      ids.review,
-    );
-    const decided = await moderator.patch(`/admin/reports/${ids.report}`, {
-      decision: 'dismiss',
-      reason: 'no_violation',
-      note: 'Receipt-backed experience.',
-    });
-    expect(decided.status).toBe(200);
+    const pub = (await guest().get(`/reviews/${ids.review}`)).body.data;
+    expect(pub.underInvestigation).toBe(true);
+    expect(
+      (await guest().get('/businesses/gadget-hub-ikeja')).body.data.rating,
+    ).toEqual(before);
+    expect(
+      (
+        await reviewer2.patch(`/admin/reports/${ids.report}`, {
+          decision: 'dismiss',
+          reason: 'no_violation',
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await moderator.patch(`/admin/reports/${ids.report}`, {
+          decision: 'dismiss',
+          reason: 'no_violation',
+          note: 'Receipt seen.',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (await guest().get(`/reviews/${ids.review}`)).body.data
+        .underInvestigation,
+    ).toBe(false);
   });
 
-  it('runs a business dispute without letting the business delete the review', async () => {
-    const url = `/manage/businesses/${ids.gadget}/reviews/${ids.review}/disputes`;
-    const d = await ownerCandidate.post(url, {
-      reason: 'false_experience',
-      details:
-        'We have no record of this order on the date given; please check the reviewer evidence.',
+  it('runs a dispute OPEN → UNDER_REVIEW → UPHELD; the original review is preserved', async () => {
+    const url = `/manage/businesses/${ids.kemi}/reviews/${ids.kemiReview}/disputes`;
+    expect((await owner.post(url, { reason: 'too short' })).status).toBe(400);
+    const d = await owner.post(url, {
+      reason:
+        'We have no record of this order in our books for the date the reviewer describes.',
     });
     expect(d.status).toBe(201);
     expect(
       (
-        await ownerCandidate.post(url, {
-          reason: 'false_experience',
-          details: 'Opening a second dispute on the same review must fail.',
+        await owner.post(url, {
+          reason:
+            'A second dispute on the same review must not be accepted at all.',
         })
       ).status,
     ).toBe(409);
-    const rejected = await moderator.patch(
-      `/admin/disputes/${d.body.data.id}`,
-      {
-        decision: 'reject',
-        reason: 'no_violation',
-        note: 'The reviewer described a real repair; no rule broken.',
-      },
-    );
-    expect(rejected.status).toBe(200);
     expect(
-      (await new Client().get(`/reviews/${ids.review}`)).body.data.status,
-    ).toBe('published');
-    const issues = (
-      await ownerCandidate.get(`/manage/businesses/${ids.gadget}/issues`)
-    ).body.data;
-    expect(issues.disputes[0].status).toBe('rejected');
+      (await guest().get(`/reviews/${ids.kemiReview}`)).body.data
+        .underInvestigation,
+    ).toBe(true);
+    expect(
+      (
+        await moderator.patch(`/admin/disputes/${d.body.data.id}`, {
+          decision: 'upheld',
+          reason: 'no_violation',
+          note: 'x'.repeat(10),
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (await listings.post(`/admin/disputes/${d.body.data.id}/start-review`))
+        .body.data.status,
+    ).toBe('under_review');
+    const decided = await listings.patch(`/admin/disputes/${d.body.data.id}`, {
+      decision: 'upheld',
+      reason: 'no_violation',
+      note: 'The review describes a real order; it stays.',
+    });
+    expect(decided.body.data.status).toBe('upheld');
+    const pub = (await guest().get(`/reviews/${ids.kemiReview}`)).body.data;
+    expect(pub.status).toBe('published');
+    expect(pub.underInvestigation).toBe(false);
+    expect(
+      (await owner.get(`/manage/businesses/${ids.kemi}/issues`)).body.data
+        .disputes[0].status,
+    ).toBe('upheld');
   });
 
-  it('requires a policy ground to remove, and labels investigations publicly', async () => {
+  it('requires a policy reason to take a review down; suspended reviews leave public pages and the rating', async () => {
     expect(
       (
         await moderator.post(`/admin/reviews/${ids.review}/moderation`, {
@@ -776,81 +1167,239 @@ describe('AC10, AC16, AC17, AC20: reports, disputes, moderation, restrictions an
         })
       ).status,
     ).toBe(400);
-    const inv = await moderator.post(
-      `/admin/reviews/${ids.review}/moderation`,
-      { action: 'investigate', reason: 'fabricated_review', note: 'Checking.' },
-    );
-    expect(inv.status).toBe(200);
-    const pub = (await new Client().get(`/reviews/${ids.review}`)).body.data;
-    expect(pub.labels.map((l: { key: string }) => l.key)).toContain(
-      'under_investigation',
-    );
+    const before = (await guest().get('/businesses/gadget-hub-ikeja')).body.data
+      .rating.reviewCount;
     expect(
       (
         await moderator.post(`/admin/reviews/${ids.review}/moderation`, {
-          action: 'clear_investigation',
+          action: 'suspend',
+          reason: 'personal_information',
+          note: 'Contains a phone number',
+        })
+      ).status,
+    ).toBe(200);
+    expect((await guest().get(`/reviews/${ids.review}`)).status).toBe(404);
+    expect(
+      (await guest().get('/businesses/gadget-hub-ikeja')).body.data.rating
+        .reviewCount,
+    ).toBe(before - 1);
+    expect(
+      (
+        await moderator.patch(`/admin/reviews/${ids.review}/content`, {
+          body: 'The phone had a faulty charging port; they replaced it after two weeks. [phone number removed by TalkGround]',
+          reason: 'personal_information',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await moderator.post(`/admin/reviews/${ids.review}/moderation`, {
+          action: 'restore',
           reason: 'no_violation',
         })
       ).status,
     ).toBe(200);
+    const history = (await moderator.get(`/admin/reviews/${ids.review}`)).body
+      .data;
+    expect(
+      history.revisions.some(
+        (r: { snapshot: { editedBy: string } }) =>
+          r.snapshot.editedBy === 'staff',
+      ),
+    ).toBe(true);
   });
 
-  it('restricts abusive accounts immediately', async () => {
+  it('changes evidenceStatus only through evidence.review, audited', async () => {
+    await prisma.review.update({
+      where: { id: ids.review },
+      data: { evidenceAttached: true },
+    });
+    expect(
+      (
+        await reviewer2.patch(`/admin/reviews/${ids.review}/evidence-status`, {
+          status: 'accepted',
+          reason: 'x',
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await moderator.patch(`/admin/reviews/${ids.review}/evidence-status`, {
+          status: 'maybe',
+          reason: 'x',
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await moderator.patch(`/admin/reviews/${ids.review}/evidence-status`, {
+          status: 'accepted',
+          reason: 'Receipt matches.',
+        })
+      ).status,
+    ).toBe(200);
+    const pub = (await guest().get(`/reviews/${ids.review}`)).body.data;
+    expect(pub.evidenceStatus).toBe('accepted');
+    expect(pub.labels.map((l: { key: string }) => l.key)).toContain(
+      'evidence_reviewed',
+    );
+  });
+
+  it('lets responses be reported and removed', async () => {
+    const rep = await reviewer2.post(
+      `/reviews/${ids.kemiReview}/response/reports`,
+      { reasonCode: 'harassment_or_abuse', note: 'Rude' },
+    );
+    expect(rep.status).toBe(201);
+    const decided = await moderator.patch(
+      `/admin/reports/${rep.body.data.id}`,
+      { decision: 'remove', reason: 'harassment' },
+    );
+    expect(decided.status).toBe(200);
+    expect(
+      (await guest().get(`/reviews/${ids.kemiReview}`)).body.data.response,
+    ).toBeNull();
+  });
+});
+
+describe('§9 permissions, §8.5 audit, §7.14 email log', () => {
+  it('enforces the PRD permission table', async () => {
+    expect((await moderator.get('/admin/reviews')).status).toBe(200);
+    expect((await moderator.get('/admin/users')).status).toBe(403); // user.suspend: Admin+
+    expect((await listings.get('/admin/users')).status).toBe(200);
+    expect((await listings.get('/admin/roles')).status).toBe(403); // role.assign: Super Admin
+    expect((await listings.get('/admin/audit-logs')).status).toBe(403); // auditlog.export: Super Admin
+    expect(
+      (await admin.get('/admin/roles')).body.data.roles
+        .map((r: { key: string }) => r.key)
+        .sort(),
+    ).toEqual(['admin', 'moderator', 'super_admin']);
+    expect((await consumer.get('/admin/dashboard')).status).toBe(403);
+  });
+
+  it('suspends abusive accounts immediately (user.suspend)', async () => {
     const victim = await newVerifiedUser('spam_account');
     const me = (await victim.get('/users/me')).body.data;
-    const s = await admin.patch(`/admin/users/${me.id}/suspension`, {
-      suspended: true,
-      reason: 'Spam reviews',
-    });
-    expect(s.status).toBe(200);
+    expect(
+      (
+        await moderator.patch(`/admin/users/${me.id}/suspension`, {
+          suspended: true,
+          reason: 'spam',
+        })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await listings.patch(`/admin/users/${me.id}/suspension`, {
+          suspended: true,
+          reason: 'Spam reviews',
+        })
+      ).status,
+    ).toBe(200);
     expect((await victim.get('/users/me')).status).toBe(401);
   });
 
-  it('enforces staff permissions', async () => {
-    expect((await consumer.get('/admin/dashboard')).status).toBe(403);
-    expect((await moderator.get('/admin/dashboard')).status).toBe(200);
-    expect((await moderator.get('/admin/audit-logs')).status).toBe(403);
-    expect((await moderator.get('/admin/businesses')).status).toBe(403);
-  });
-
-  it('records sensitive actions in the audit log (actor, action, target, time)', async () => {
+  it('audit-logs sensitive actions with actor, target, before/after and reason; exports CSV', async () => {
     for (const action of [
       'claim.approve',
+      'claim.reject',
       'business.merge',
+      'business.status',
       'user.suspend',
-      'submission.approve',
+      'suggestion.approve',
       'moderation.review',
+      'category.create',
+      'city.create',
+      'dispute.open',
     ]) {
       const res = await admin.get(`/admin/audit-logs?action=${action}`);
       expect(res.status).toBe(200);
       expect(res.body.meta.total).toBeGreaterThan(0);
-      const row = res.body.data[0];
-      expect(row.actorId).toBeTruthy();
-      expect(row.targetId).toBeTruthy();
-      expect(row.createdAt).toBeTruthy();
     }
+    const suspend = (await admin.get('/admin/audit-logs?action=user.suspend'))
+      .body.data[0];
+    expect(suspend).toMatchObject({
+      targetType: 'user',
+      before: { suspended: false },
+      after: { suspended: true },
+      reason: 'Spam reviews',
+    });
+    expect(suspend.actorId).toBeTruthy();
+    const csv = await admin.get('/admin/audit-logs/export?action=claim.');
+    expect(csv.status).toBe(200);
+    expect(csv.headers['content-type']).toMatch(/text\/csv/);
+    expect(csv.text.split('\r\n')[0]).toContain('createdAt,actorId');
+  });
+
+  it('records transactional emails with delivery status (provider not configured → failed, retryable)', async () => {
+    const log = (await listings.get('/admin/emails?status=failed')).body;
+    expect(log.meta.total).toBeGreaterThan(0);
+    const kinds = new Set(log.data.map((e: { kind: string }) => e.kind));
+    for (const k of [
+      'claim.decision',
+      'review.business_response',
+      'dispute.update',
+    ])
+      expect(kinds.has(k)).toBe(true);
+    expect(
+      (await listings.post(`/admin/emails/${log.data[0].id}/retry`)).body.data
+        .delivered,
+    ).toBe(false);
   });
 });
 
-describe('AC1, AC19: data rights', () => {
-  it('exports and deletes an account, withdrawing its reviews', async () => {
+describe('§15 data rights', () => {
+  it('exports and deletes an account; its reviews leave public pages and ratings', async () => {
     const exp = await consumer.get('/users/me/export');
-    expect(exp.status).toBe(200);
     expect(exp.body.data.reviews.length).toBeGreaterThan(0);
     expect(
       (await consumer.delete('/users/me', { password: 'wrong-password' }))
         .status,
     ).toBe(401);
-    const del = await consumer.delete('/users/me', { password: 'Secret123!' });
-    expect(del.status).toBe(200);
-    const relogin = await new Client().post('/auth/login', {
-      email: 'e2e_consumer@example.com',
-      password: 'Secret123!',
-    });
-    expect(relogin.status).toBe(401);
-    const gadget = await prisma.business.findUniqueOrThrow({
-      where: { id: ids.gadget },
-    });
-    expect(gadget.reviewCount).toBe(5);
+    const before = (await guest().get('/businesses/gadget-hub-ikeja')).body.data
+      .rating.reviewCount;
+    expect(
+      (await consumer.delete('/users/me', { password: 'Secret123!' })).status,
+    ).toBe(200);
+    expect(
+      (
+        await guest().post('/auth/login', {
+          email: 'e2e_consumer@example.org',
+          password: 'Secret123!',
+        })
+      ).status,
+    ).toBe(401);
+    expect((await guest().get(`/reviews/${ids.review}`)).status).toBe(404);
+    expect(
+      (await guest().get('/businesses/gadget-hub-ikeja')).body.data.rating
+        .reviewCount,
+    ).toBe(before - 1);
+  });
+});
+
+describe('§0.3 definition of done: Swagger documents every response', () => {
+  it('every operation has a documented 2xx response with a schema', () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { DocumentBuilder, SwaggerModule } = require('@nestjs/swagger');
+    const doc = SwaggerModule.createDocument(
+      app,
+      new DocumentBuilder().build(),
+    );
+    const missing: string[] = [];
+    for (const [path, ops] of Object.entries(
+      doc.paths as Record<
+        string,
+        Record<string, { responses?: Record<string, { content?: unknown }> }>
+      >,
+    )) {
+      for (const [method, op] of Object.entries(ops)) {
+        const ok = Object.entries(op.responses ?? {}).some(
+          ([code, r]) => code.startsWith('2') && !!r.content,
+        );
+        if (!ok && !path.endsWith('/export'))
+          missing.push(`${method.toUpperCase()} ${path}`);
+      }
+    }
+    expect(missing).toEqual([]);
   });
 });

@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
-import { APP_FILTER, APP_GUARD } from '@nestjs/core';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { ReviewsModule } from './reviews/reviews.module';
@@ -21,6 +21,9 @@ import { ClaimsModule } from './claims/claims.module';
 import { PortalModule } from './portal/portal.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { AppConfigModule } from './common/app-config';
+import { RevalidationModule } from './revalidation/revalidation.service';
+import { CacheControlInterceptor } from './common/cache.interceptor';
 
 @Module({
   imports: [
@@ -28,7 +31,9 @@ import { NotificationsModule } from './notifications/notifications.module';
     // Global default: 120 requests/minute per IP. Auth routes set stricter limits with @Throttle.
     // In-memory store: correct for a single instance; move to Redis before scaling horizontally.
     ThrottlerModule.forRoot([{ name: 'default', ttl: 60_000, limit: 120 }]),
+    AppConfigModule,
     PrismaModule,
+    RevalidationModule,
     EmailModule,
     AuditModule,
     NotificationsModule,
@@ -50,6 +55,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_FILTER, useClass: GlobalExceptionFilter },
+    { provide: APP_INTERCEPTOR, useClass: CacheControlInterceptor },
   ],
 })
 export class AppModule {}

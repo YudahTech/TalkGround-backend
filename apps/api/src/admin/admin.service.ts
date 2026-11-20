@@ -6,12 +6,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  AdminPermission,
-  BusinessSource,
   BusinessStatus,
   ClaimStatus,
   DisputeStatus,
+  EmailStatus,
   EvidenceStatus,
+  ListingSource,
   OwnershipStatus,
   Prisma,
   ReportStatus,
@@ -22,12 +22,16 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { AuthService } from '../auth/auth.service';
 import { BusinessWriterService } from '../businesses/business-writer.service';
-import { BusinessesService } from '../businesses/businesses.service';
 import { RatingsService } from '../businesses/ratings.service';
-import { lifecycleStage } from '../businesses/lifecycle';
+import { SeoService } from '../businesses/seo.service';
+import { presentLocation } from '../businesses/businesses.service';
+import { assertTransition, canTransition } from '../businesses/lifecycle';
+import { RevalidationService } from '../revalidation/revalidation.service';
+import { ModerationService } from '../moderation/moderation.service';
+import { PERMISSIONS, ALL_PERMISSIONS } from '../common/permissions';
 import { pageMeta, skipTake } from '../common/pagination';
 import { normalizeNigerianPhone } from '../common/identifiers';
-import { cleanText } from '../common/utils';
+import { cleanText, slugify } from '../common/utils';
 import type { AuthUser } from '../common/current-user.decorator';
 import type {
   AdminUpdateBusinessDto,
@@ -38,13 +42,23 @@ import type {
   AdminBusinessQueryDto,
   BusinessStatusDto,
   CreateCategoryDto,
+  CreateCityDto,
   CreateDimensionDto,
-  InvestigationDto,
   MergeBusinessDto,
-  UpsertCategoryDto,
-  UpsertDimensionDto,
+  NoindexDto,
+  UpdateCategoryDto,
+  UpdateCityDto,
+  UpdateDimensionDto,
   UserListQueryDto,
 } from './admin.dto';
+import type {
+  AdminBusinessDetailDto,
+  AdminBusinessListItemDto,
+  AdminDashboardDto,
+  DuplicatePairDto,
+  RolesDto,
+  TaxonomyDto,
+} from './admin.responses';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -60,6 +74,21 @@ const SAFE_USER_SELECT = {
   adminRole: { select: { key: true, name: true } },
 } satisfies Prisma.UserSelect;
 
+const BUSINESS_LIST_INCLUDE = {
+  category: { select: { slug: true, name: true } },
+  city: { select: { slug: true, name: true, state: true } },
+  _count: {
+    select: {
+      claims: { where: { status: ClaimStatus.PENDING } },
+      identifiers: true,
+    },
+  },
+} satisfies Prisma.BusinessInclude;
+
+type BusinessListRow = Prisma.BusinessGetPayload<{
+  include: typeof BUSINESS_LIST_INCLUDE;
+}>;
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -67,8 +96,10 @@ export class AdminService {
     private audit: AuditService,
     private auth: AuthService,
     private writer: BusinessWriterService,
-    private businesses: BusinessesService,
     private ratings: RatingsService,
+    private seo: SeoService,
+    private revalidate: RevalidationService,
+    private moderation: ModerationService,
   ) {}
 
   private actor(user: AuthUser) {
@@ -77,76 +108,111 @@ export class AdminService {
 
   // ─────────────────────────────────────────────────────────────── dashboard
 
-  /** Work queues + headline numbers (PRD §8.1, §15). Every staff member can see it. */
-  async dashboard() {
+  async dashboard(): Promise<{ data: AdminDashboardDto }> {
+    const c = (p: Promise<number>) => p;
     const [
-      businesses,
-      claimed,
-      reviews,
+      publishedBusinesses,
+      claimedBusinesses,
+      publishedReviews,
       users,
-      pendingModeration,
+      pendingReviews,
       underInvestigation,
       openReports,
-      openDisputes,
+      activeDisputes,
       pendingClaims,
       pendingSubmissions,
       evidenceToReview,
+      failedEmails,
     ] = await Promise.all([
-      this.prisma.business.count({
-        where: { status: BusinessStatus.PUBLISHED },
-      }),
-      this.prisma.business.count({
-        where: {
-          status: BusinessStatus.PUBLISHED,
-          ownershipStatus: {
-            in: [OwnershipStatus.CLAIMED, OwnershipStatus.VERIFIED],
+      c(
+        this.prisma.business.count({
+          where: { status: BusinessStatus.PUBLISHED },
+        }),
+      ),
+      c(
+        this.prisma.business.count({
+          where: {
+            status: BusinessStatus.PUBLISHED,
+            ownershipStatus: OwnershipStatus.CLAIMED,
           },
-        },
-      }),
-      this.prisma.review.count({
-        where: {
-          status: {
-            in: [ReviewStatus.PUBLISHED, ReviewStatus.UNDER_INVESTIGATION],
+        }),
+      ),
+      c(
+        this.prisma.review.count({
+          where: { status: ReviewStatus.PUBLISHED, deletedAt: null },
+        }),
+      ),
+      c(this.prisma.user.count({ where: { deletedAt: null } })),
+      c(
+        this.prisma.review.count({
+          where: { status: ReviewStatus.PENDING, deletedAt: null },
+        }),
+      ),
+      c(
+        this.prisma.review.count({
+          where: {
+            deletedAt: null,
+            OR: [
+              { underInvestigation: true },
+              { status: ReviewStatus.UNDER_INVESTIGATION },
+            ],
           },
-        },
-      }),
-      this.prisma.user.count({ where: { deletedAt: null } }),
-      this.prisma.review.count({
-        where: { status: ReviewStatus.PENDING_MODERATION },
-      }),
-      this.prisma.review.count({
-        where: { status: ReviewStatus.UNDER_INVESTIGATION },
-      }),
-      this.prisma.reviewReport.count({ where: { status: ReportStatus.OPEN } }),
-      this.prisma.businessDispute.count({
-        where: { status: DisputeStatus.OPEN },
-      }),
-      this.prisma.businessClaim.count({
-        where: { status: ClaimStatus.PENDING },
-      }),
-      this.prisma.businessSubmission.count({
-        where: { status: SubmissionStatus.PENDING_REVIEW },
-      }),
-      this.prisma.reviewEvidence.count({
-        where: { status: EvidenceStatus.NOT_REVIEWED },
-      }),
+        }),
+      ),
+      c(
+        this.prisma.reviewReport.count({
+          where: { status: ReportStatus.OPEN },
+        }),
+      ),
+      c(
+        this.prisma.businessDispute.count({
+          where: {
+            status: { in: [DisputeStatus.OPEN, DisputeStatus.UNDER_REVIEW] },
+          },
+        }),
+      ),
+      c(
+        this.prisma.businessClaim.count({
+          where: { status: ClaimStatus.PENDING },
+        }),
+      ),
+      c(
+        this.prisma.businessSubmission.count({
+          where: { status: SubmissionStatus.PENDING_REVIEW },
+        }),
+      ),
+      c(
+        this.prisma.review.count({
+          where: {
+            evidenceAttached: true,
+            evidenceStatus: EvidenceStatus.NOT_REVIEWED,
+            deletedAt: null,
+          },
+        }),
+      ),
+      c(
+        this.prisma.notificationEmail.count({
+          where: { status: EmailStatus.FAILED },
+        }),
+      ),
     ]);
     return {
       data: {
         totals: {
-          publishedBusinesses: businesses,
-          claimedBusinesses: claimed,
-          publishedReviews: reviews,
+          publishedBusinesses,
+          claimedBusinesses,
+          publishedReviews,
           users,
         },
         queues: {
-          pendingModeration,
+          pendingReviews,
           underInvestigation,
           openReports,
-          openDisputes,
+          activeDisputes,
           pendingClaims,
           pendingSubmissions,
           evidenceToReview,
+          failedEmails,
         },
       },
     };
@@ -172,12 +238,7 @@ export class AdminService {
       this.prisma.user.count({ where }),
       this.prisma.user.findMany({
         where,
-        select: {
-          ...SAFE_USER_SELECT,
-          _count: {
-            select: { reviews: true, reports: true, memberships: true },
-          },
-        },
+        select: SAFE_USER_SELECT,
         orderBy: { createdAt: 'desc' },
         ...skipTake(q.page, q.limit),
       }),
@@ -217,15 +278,17 @@ export class AdminService {
         overallRating: true,
         title: true,
         status: true,
+        deletedAt: true,
         createdAt: true,
         business: { select: { slug: true, name: true } },
         flags: { select: { type: true } },
       },
     });
-    return { data: { ...user, recentReviews } };
+    const { _count, memberships, ...rest } = user;
+    return { data: { ...rest, memberships, recentReviews, counts: _count } };
   }
 
-  /** PRD §8.1 "restrict abusive accounts". Suspension signs the user out everywhere. */
+  /** PRD §8.5 user suspension. Suspension signs the user out everywhere. */
   async suspendUser(
     actor: AuthUser,
     id: string,
@@ -241,10 +304,10 @@ export class AdminService {
     if (!target) throw new NotFoundException('User not found');
     if (
       target.adminRole &&
-      !actor.permissions.includes(AdminPermission.STAFF_MANAGE)
+      !actor.permissions.includes(PERMISSIONS.ROLE_ASSIGN)
     ) {
       throw new ForbiddenException(
-        'Suspending a staff member requires STAFF_MANAGE',
+        'Suspending a staff member requires role.assign',
       );
     }
     const user = await this.prisma.user.update({
@@ -260,31 +323,47 @@ export class AdminService {
       action: suspended ? 'user.suspend' : 'user.unsuspend',
       targetType: 'user',
       targetId: id,
-      metadata: { reason },
+      before: { suspended: target.suspended },
+      after: { suspended },
+      reason,
     });
+    if (suspended) {
+      const reviewed = await this.prisma.review.findMany({
+        where: { userId: id },
+        select: { businessId: true },
+        distinct: ['businessId'],
+      });
+      void this.revalidate.businesses(reviewed.map((r) => r.businessId));
+    }
     return { data: user };
   }
 
-  roles() {
-    return this.prisma.adminRole
-      .findMany({
-        orderBy: { name: 'asc' },
-        include: { _count: { select: { users: true } } },
-      })
-      .then((rows) => ({
-        data: rows.map((r) => ({
+  async roles(): Promise<{ data: RolesDto }> {
+    const rows = await this.prisma.adminRole.findMany({
+      orderBy: { name: 'asc' },
+      include: { _count: { select: { users: true } } },
+    });
+    return {
+      data: {
+        roles: rows.map((r) => ({
           key: r.key,
           name: r.name,
           description: r.description,
           permissions: r.permissions,
           members: r._count.users,
         })),
-        allPermissions: Object.values(AdminPermission),
-      }));
+        allPermissions: ALL_PERMISSIONS,
+      },
+    };
   }
 
-  /** PRD §8.5 "administrative account changes" — always audited; sessions are revoked. */
-  async setStaffRole(actor: AuthUser, id: string, roleKey: string | null) {
+  /** PRD §9 role.assign. Always audited (target type "role"); the user's sessions are revoked. */
+  async setStaffRole(
+    actor: AuthUser,
+    id: string,
+    roleKey: string | null,
+    reason: string,
+  ) {
     if (id === actor.id)
       throw new BadRequestException('You cannot change your own staff role');
     const target = await this.prisma.user.findUnique({
@@ -298,11 +377,10 @@ export class AdminService {
       : null;
     if (roleKey && !role)
       throw new BadRequestException(`Unknown role: ${roleKey}`);
-    if (role && !target.emailVerified) {
+    if (role && !target.emailVerified)
       throw new BadRequestException(
         'Staff accounts must have a verified email address',
       );
-    }
     if (
       target.adminRole?.key === 'super_admin' &&
       role?.key !== 'super_admin'
@@ -325,15 +403,39 @@ export class AdminService {
     });
     await this.auth.revokeAllSessions(id);
     await this.audit.record(this.actor(actor), {
-      action: 'user.staff_role_change',
-      targetType: 'user',
+      action: 'role.assign',
+      targetType: 'role',
       targetId: id,
-      metadata: { from: target.adminRole?.key ?? null, to: role?.key ?? null },
+      before: { role: target.adminRole?.key ?? null },
+      after: { role: role?.key ?? null },
+      reason,
     });
     return { data: user };
   }
 
   // ──────────────────────────────────────────────────────────────── businesses
+
+  private presentListItem(b: BusinessListRow): AdminBusinessListItemDto {
+    return {
+      id: b.id,
+      slug: b.slug,
+      name: b.name,
+      category: b.category,
+      location: presentLocation(b),
+      status: b.status.toLowerCase(),
+      ownershipStatus: b.ownershipStatus.toLowerCase(),
+      ownershipVerified: b.ownershipVerified,
+      createdBySource: b.createdBySource.toLowerCase(),
+      noindexOverride: b.noindexOverride,
+      indexable: this.seo.isIndexable({
+        ...b,
+        identifierCount: b._count.identifiers,
+      }),
+      reviewCount: b.reviewCount,
+      pendingClaims: b._count.claims,
+      createdAt: b.createdAt,
+    };
+  }
 
   async listBusinesses(q: AdminBusinessQueryDto) {
     const where: Prisma.BusinessWhereInput = {
@@ -343,6 +445,7 @@ export class AdminService {
         ? { ownershipStatus: q.ownership.toUpperCase() as OwnershipStatus }
         : {}),
       ...(q.category ? { category: { slug: q.category } } : {}),
+      ...(q.city ? { city: { slug: q.city } } : {}),
     };
     const [total, rows] = await Promise.all([
       this.prisma.business.count({ where }),
@@ -350,40 +453,22 @@ export class AdminService {
         where,
         orderBy: { createdAt: 'desc' },
         ...skipTake(q.page, q.limit),
-        include: {
-          category: { select: { slug: true, name: true } },
-          _count: {
-            select: { claims: { where: { status: ClaimStatus.PENDING } } },
-          },
-        },
+        include: BUSINESS_LIST_INCLUDE,
       }),
     ]);
     return {
-      data: rows.map((b) => ({
-        id: b.id,
-        slug: b.slug,
-        name: b.name,
-        category: b.category,
-        status: b.status.toLowerCase(),
-        ownershipStatus: b.ownershipStatus.toLowerCase(),
-        lifecycleStage: lifecycleStage(b),
-        source: b.source.toLowerCase(),
-        underInvestigation: b.underInvestigation,
-        reviewCount: b.reviewCount,
-        pendingClaims: b._count.claims,
-        createdAt: b.createdAt,
-      })),
+      data: rows.map((b) => this.presentListItem(b)),
       meta: pageMeta(q.page, q.limit, total),
     };
   }
 
-  async businessDetail(id: string) {
+  async businessDetail(id: string): Promise<{ data: AdminBusinessDetailDto }> {
     const b = await this.prisma.business.findUnique({
       where: { id },
       include: {
-        category: { select: { slug: true, name: true } },
+        ...BUSINESS_LIST_INCLUDE,
         identifiers: { orderBy: { createdAt: 'asc' } },
-        locations: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+        slugHistory: { orderBy: { createdAt: 'desc' } },
         members: {
           where: { revokedAt: null },
           include: {
@@ -398,15 +483,16 @@ export class AdminService {
           },
         },
         mergedInto: { select: { id: true, slug: true, name: true } },
-        mergedFrom: { select: { id: true, slug: true, name: true } },
       },
     });
     if (!b) throw new NotFoundException('Business not found');
-    const [duplicates, history] = await Promise.all([
+    const [dimensions, duplicates, history] = await Promise.all([
+      this.ratings.dimensionBreakdown(b.id, b.categoryId),
       b.status === BusinessStatus.MERGED
-        ? []
+        ? Promise.resolve([])
         : this.writer.findDuplicateCandidates({
             name: b.name,
+            identifiers: b.identifiers,
             excludeBusinessId: b.id,
           }),
       this.audit.list({
@@ -416,54 +502,69 @@ export class AdminService {
         targetId: b.id,
       }),
     ]);
+    const allStatuses = Object.values(BusinessStatus);
     return {
       data: {
-        ...b,
-        status: b.status.toLowerCase(),
-        ownershipStatus: b.ownershipStatus.toLowerCase(),
-        lifecycleStage: lifecycleStage(b),
-        locations: b.locations.map((l) => this.businesses.presentLocation(l)),
-        rating: this.ratings.summary(b),
-        managers: b.members.map((m) => ({
+        ...this.presentListItem(b),
+        description: b.description,
+        logoUrl: b.logoUrl,
+        website: b.website,
+        publicEmail: b.publicEmail,
+        publicPhone: b.publicPhone,
+        identifiers: b.identifiers.map((i) => ({
+          id: i.id,
+          type: i.type.toLowerCase(),
+          value: i.value,
+          normalizedValue: i.normalizedValue,
+          verified: i.verified,
+          editableByOwner: true,
+        })),
+        previousSlugs: b.slugHistory.map((h) => h.oldSlug),
+        rating: { ...this.ratings.summary(b), dimensions },
+        members: b.members.map((m) => ({
           ...m.user,
           role: m.role.toLowerCase(),
           since: m.createdAt,
         })),
+        mergedInto: b.mergedInto,
         duplicateCandidates: duplicates,
+        allowedTransitions: allStatuses
+          .filter((s) => canTransition(b.status, s))
+          .map((s) => s.toLowerCase()),
         auditTrail: history.data,
-        searchText: undefined,
-        members: undefined,
       },
     };
   }
 
-  /** PRD §6.2 channel 1: staff-created listings, with duplicate checks. */
+  /**
+   * PRD §6.2 source 1: staff-created listing. Possible duplicates need explicit confirmation;
+   * a description is required to publish so admins never bulk-create thin pages (§7.13).
+   */
   async createBusiness(actor: AuthUser, dto: CreateBusinessDto) {
     const categoryId = await this.writer.categoryIdBySlug(dto.category);
+    const location = await this.writer.resolveLocation(dto);
     const identifiers = this.writer.prepareIdentifiers([
       ...(dto.identifiers ?? []),
       ...this.writer.profileFieldIdentifiers(dto),
     ]);
-    const similar = (
-      await this.writer.findDuplicateCandidates({ name: dto.name, identifiers })
-    ).filter((c) => c.status !== 'MERGED');
-    if (similar.length && !dto.confirmNotDuplicate) {
-      throw new ConflictException({
-        message:
-          'Possible duplicates found. Merge instead, or resend with confirmNotDuplicate: true.',
-        duplicateCandidates: similar,
-      });
-    }
+    this.writer.assertNoUnconfirmedDuplicates(
+      await this.writer.findDuplicateCandidates({
+        name: dto.name,
+        identifiers,
+      }),
+      dto.confirmNotDuplicate,
+    );
+    const publish = dto.publish !== false;
     const business = await this.prisma.$transaction(async (tx) => {
       const created = await this.writer.create(
         {
           ...dto,
           categoryId,
-          status:
-            dto.publish === false
-              ? BusinessStatus.PENDING_REVIEW
-              : BusinessStatus.PUBLISHED,
-          source: BusinessSource.ADMIN,
+          ...location,
+          status: publish
+            ? BusinessStatus.PUBLISHED
+            : BusinessStatus.PENDING_REVIEW,
+          createdBySource: ListingSource.ADMIN,
           createdById: actor.id,
         },
         tx,
@@ -474,12 +575,17 @@ export class AdminService {
           action: 'business.create',
           targetType: 'business',
           targetId: created.id,
-          metadata: { name: created.name, status: created.status },
+          after: {
+            name: created.name,
+            status: created.status,
+            slug: created.slug,
+          },
         },
         tx,
       );
       return created;
     });
+    void this.revalidate.business(business.id);
     return this.businessDetail(business.id);
   }
 
@@ -490,21 +596,28 @@ export class AdminService {
   ) {
     const existing = await this.prisma.business.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException('Business not found');
-    if (dto.publicPhone && !normalizeNigerianPhone(dto.publicPhone)) {
+    if (dto.publicPhone && !normalizeNigerianPhone(dto.publicPhone))
       throw new BadRequestException(
         'publicPhone must be a Nigerian phone number',
       );
-    }
     const categoryId = dto.category
-      ? await this.writer.categoryIdBySlug(dto.category)
+      ? await this.writer.categoryIdBySlug(dto.category, this.prisma, true)
       : undefined;
+    const locationTouched =
+      dto.city !== undefined ||
+      dto.area !== undefined ||
+      dto.onlineOnly !== undefined;
+    const location = locationTouched
+      ? await this.writer.resolveLocation(dto, this.prisma, existing)
+      : null;
     await this.prisma.$transaction(async (tx) => {
+      if (dto.name) await this.writer.rename(id, dto.name, tx);
       await this.writer.syncProfileIdentifiers(id, dto, tx);
-      await tx.business.update({
+      const after = await tx.business.update({
         where: { id },
         data: {
-          ...(dto.name ? { name: cleanText(dto.name) } : {}),
           ...(categoryId ? { categoryId } : {}),
+          ...(location ?? {}),
           ...(dto.description !== undefined
             ? {
                 description: dto.description
@@ -530,8 +643,6 @@ export class AdminService {
             : {}),
         },
       });
-      if (dto.locations)
-        await this.writer.replaceLocations(id, dto.locations, tx);
       await this.writer.rebuildSearchText(id, tx);
       await this.audit.record(
         this.actor(actor),
@@ -539,51 +650,83 @@ export class AdminService {
           action: 'business.update',
           targetType: 'business',
           targetId: id,
-          metadata: {
-            fields: Object.keys(dto),
-            ...(dto.name && dto.name !== existing.name
-              ? { renamedFrom: existing.name }
-              : {}),
-            ...(categoryId && categoryId !== existing.categoryId
-              ? { categoryFrom: existing.categoryId }
-              : {}),
+          before: {
+            name: existing.name,
+            slug: existing.slug,
+            categoryId: existing.categoryId,
+            cityId: existing.cityId,
+            area: existing.area,
+            description: existing.description,
+          },
+          after: {
+            name: after.name,
+            slug: after.slug,
+            categoryId: after.categoryId,
+            cityId: after.cityId,
+            area: after.area,
+            description: after.description,
           },
         },
         tx,
       );
     });
+    void this.revalidate.paths([`/b/${existing.slug}`]);
+    void this.revalidate.business(id);
     return this.businessDetail(id);
   }
 
   async addIdentifier(actor: AuthUser, id: string, dto: IdentifierInputDto) {
-    const created = await this.writer.addIdentifier(id, dto);
+    const { identifier, alsoUsedBy } = await this.writer.addIdentifier(id, dto);
     await this.audit.record(this.actor(actor), {
       action: 'business.identifier_add',
       targetType: 'business',
       targetId: id,
-      metadata: { type: created.type, value: created.normalizedValue },
+      after: { type: identifier.type, value: identifier.normalizedValue },
     });
-    return { data: created };
+    void this.revalidate.business(id);
+    return { data: { identifier, alsoUsedBy } };
   }
 
   async removeIdentifier(actor: AuthUser, id: string, identifierId: string) {
+    const ident = await this.prisma.businessIdentifier.findFirst({
+      where: { id: identifierId, businessId: id },
+    });
     await this.writer.removeIdentifier(id, identifierId);
     await this.audit.record(this.actor(actor), {
       action: 'business.identifier_remove',
       targetType: 'business',
       targetId: id,
-      metadata: { identifierId },
+      before: ident ? { type: ident.type, value: ident.normalizedValue } : null,
     });
+    void this.revalidate.business(id);
     return { data: { message: 'Removed' } };
   }
 
-  /** PRD §7.4 lifecycle moves: publish, suspend, archive, back to pending. */
+  /** PRD §7.4 transitions only; suspending or unsuspending also needs business.suspend. */
   async setStatus(actor: AuthUser, id: string, dto: BusinessStatusDto) {
-    const b = await this.prisma.business.findUnique({ where: { id } });
+    const b = await this.prisma.business.findUnique({
+      where: { id },
+      include: { _count: { select: { identifiers: true } } },
+    });
     if (!b) throw new NotFoundException('Business not found');
-    if (b.status === BusinessStatus.MERGED)
-      throw new BadRequestException('A merged listing cannot change status');
     const next = dto.status.toUpperCase() as BusinessStatus;
+    assertTransition(b.status, next);
+    if (
+      (next === BusinessStatus.SUSPENDED ||
+        b.status === BusinessStatus.SUSPENDED) &&
+      !actor.permissions.includes(PERMISSIONS.BUSINESS_SUSPEND)
+    ) {
+      throw new ForbiddenException('Missing permission: business.suspend');
+    }
+    if (
+      next === BusinessStatus.PUBLISHED &&
+      b.status === BusinessStatus.PENDING_REVIEW &&
+      !b.description
+    ) {
+      throw new BadRequestException(
+        'Add a factual description before publishing (PRD §7.13)',
+      );
+    }
     await this.prisma.$transaction(async (tx) => {
       await tx.business.update({
         where: { id },
@@ -600,36 +743,41 @@ export class AdminService {
           action: `business.status.${dto.status}`,
           targetType: 'business',
           targetId: id,
-          metadata: { from: b.status, to: next, reason: dto.reason },
+          before: { status: b.status },
+          after: { status: next },
+          reason: dto.reason,
         },
         tx,
       );
     });
+    void this.revalidate.business(id);
     return this.businessDetail(id);
   }
 
-  async setInvestigation(actor: AuthUser, id: string, dto: InvestigationDto) {
+  /** PRD §7.13: a moderator can force noindex (e.g. during a legal complaint). Audited. */
+  async setNoindex(actor: AuthUser, id: string, dto: NoindexDto) {
     const b = await this.prisma.business.findUnique({ where: { id } });
     if (!b) throw new NotFoundException('Business not found');
-    await this.prisma.business.update({
-      where: { id },
-      data: {
-        underInvestigation: dto.underInvestigation,
-        investigationNote: dto.underInvestigation
-          ? dto.publicNote
-            ? cleanText(dto.publicNote)
-            : null
-          : null,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      await tx.business.update({
+        where: { id },
+        data: { noindexOverride: dto.noindex },
+      });
+      await this.moderation.record(
+        actor,
+        {
+          targetType: 'BUSINESS',
+          targetId: id,
+          action: dto.noindex ? 'NOINDEX_ON' : 'NOINDEX_OFF',
+          reason: 'OTHER',
+          note: dto.reason,
+          before: { noindexOverride: b.noindexOverride },
+          after: { noindexOverride: dto.noindex },
+        },
+        tx,
+      );
     });
-    await this.audit.record(this.actor(actor), {
-      action: dto.underInvestigation
-        ? 'business.investigation_open'
-        : 'business.investigation_close',
-      targetType: 'business',
-      targetId: id,
-      metadata: { reason: dto.reason, publicNote: dto.publicNote ?? null },
-    });
+    void this.revalidate.business(id);
     return this.businessDetail(id);
   }
 
@@ -642,39 +790,83 @@ export class AdminService {
     return {
       data: await this.writer.findDuplicateCandidates({
         name: b.name,
+        identifiers: b.identifiers,
         excludeBusinessId: id,
       }),
     };
   }
 
-  /** Platform-wide scan for likely duplicate pairs (PRD acceptance criterion 5). */
-  async duplicateScan() {
-    const pairs = await this.prisma.$queryRaw<
-      {
-        aId: string;
-        aSlug: string;
-        aName: string;
-        bId: string;
-        bSlug: string;
-        bName: string;
-        similarity: number;
-      }[]
-    >`
-      SELECT a.id AS "aId", a.slug AS "aSlug", a.name AS "aName",
-             b.id AS "bId", b.slug AS "bSlug", b.name AS "bName",
-             similarity(lower(a.name), lower(b.name)) AS similarity
-      FROM "Business" a
-      JOIN "Business" b ON a.id < b.id AND lower(a.name) % lower(b.name)
-      WHERE a.status NOT IN ('MERGED', 'ARCHIVED') AND b.status NOT IN ('MERGED', 'ARCHIVED')
-        AND similarity(lower(a.name), lower(b.name)) > 0.5
-      ORDER BY similarity DESC
-      LIMIT 50`;
+  /** Platform-wide duplicate scan: shared identifiers (strongest: social handles) and similar names. */
+  async duplicateScan(): Promise<{ data: DuplicatePairDto[] }> {
+    const [shared, similar] = await Promise.all([
+      this.prisma.$queryRaw<
+        {
+          aId: string;
+          aSlug: string;
+          aName: string;
+          bId: string;
+          bSlug: string;
+          bName: string;
+          signal: string;
+        }[]
+      >`
+        SELECT a.id AS "aId", a.slug AS "aSlug", a.name AS "aName", b.id AS "bId", b.slug AS "bSlug", b.name AS "bName",
+               lower(ia.type::text) || ':' || ia."normalizedValue" AS signal
+        FROM "BusinessIdentifier" ia
+        JOIN "BusinessIdentifier" ib ON ib.type = ia.type AND ib."normalizedValue" = ia."normalizedValue" AND ib."businessId" > ia."businessId"
+        JOIN "Business" a ON a.id = ia."businessId"
+        JOIN "Business" b ON b.id = ib."businessId"
+        WHERE a.status NOT IN ('MERGED', 'ARCHIVED', 'REJECTED') AND b.status NOT IN ('MERGED', 'ARCHIVED', 'REJECTED')
+        LIMIT 200`,
+      this.prisma.$queryRaw<
+        {
+          aId: string;
+          aSlug: string;
+          aName: string;
+          bId: string;
+          bSlug: string;
+          bName: string;
+          sim: number;
+        }[]
+      >`
+        SELECT a.id AS "aId", a.slug AS "aSlug", a.name AS "aName", b.id AS "bId", b.slug AS "bSlug", b.name AS "bName",
+               similarity(lower(a.name), lower(b.name)) AS sim
+        FROM "Business" a
+        JOIN "Business" b ON a.id < b.id AND lower(a.name) % lower(b.name)
+        WHERE a.status NOT IN ('MERGED', 'ARCHIVED', 'REJECTED') AND b.status NOT IN ('MERGED', 'ARCHIVED', 'REJECTED')
+          AND similarity(lower(a.name), lower(b.name)) > 0.5
+        ORDER BY sim DESC
+        LIMIT 100`,
+    ]);
+    const pairs = new Map<string, DuplicatePairDto>();
+    const key = (x: string, y: string) => [x, y].sort().join('|');
+    for (const s of shared) {
+      const k = key(s.aId, s.bId);
+      const p = pairs.get(k) ?? {
+        a: { id: s.aId, slug: s.aSlug, name: s.aName },
+        b: { id: s.bId, slug: s.bSlug, name: s.bName },
+        signals: [],
+        nameSimilarity: null,
+      };
+      p.signals.push(`same ${s.signal}`);
+      pairs.set(k, p);
+    }
+    for (const s of similar) {
+      const k = key(s.aId, s.bId);
+      const p = pairs.get(k) ?? {
+        a: { id: s.aId, slug: s.aSlug, name: s.aName },
+        b: { id: s.bId, slug: s.bSlug, name: s.bName },
+        signals: [],
+        nameSimilarity: null,
+      };
+      p.nameSimilarity = Math.round(s.sim * 100) / 100;
+      p.signals.push(`similar name (${Math.round(s.sim * 100)}%)`);
+      pairs.set(k, p);
+    }
     return {
-      data: pairs.map((p) => ({
-        a: { id: p.aId, slug: p.aSlug, name: p.aName },
-        b: { id: p.bId, slug: p.bSlug, name: p.bName },
-        similarity: Math.round(p.similarity * 100) / 100,
-      })),
+      data: [...pairs.values()]
+        .sort((x, y) => y.signals.length - x.signals.length)
+        .slice(0, 100),
     };
   }
 
@@ -684,31 +876,37 @@ export class AdminService {
       action: 'business.merge',
       targetType: 'business',
       targetId: sourceId,
-      metadata: {
-        into: dto.targetId,
-        reason: dto.reason,
-        movedReviews: result.movedReviews,
-      },
+      before: result.before,
+      after: { status: BusinessStatus.MERGED, mergedIntoId: dto.targetId },
+      reason: dto.reason,
+      metadata: { movedReviews: result.movedReviews },
     });
-    return { data: result };
+    void this.revalidate.paths([`/b/${result.source.slug}`]);
+    void this.revalidate.business(dto.targetId);
+    const { before: _b, ...data } = result;
+    return { data };
   }
 
-  // ───────────────────────────────────────────────────────────────── taxonomy
+  // ─────────────────────────────────────────────────── categories, dimensions, cities
 
-  async listTaxonomy() {
-    const [categories, dimensions] = await Promise.all([
-      this.prisma.businessCategory.findMany({
+  async listTaxonomy(): Promise<{ data: TaxonomyDto }> {
+    const [categories, dimensions, cities, cityCounts] = await Promise.all([
+      this.prisma.category.findMany({
         orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
         include: {
+          parent: { select: { slug: true } },
           dimensions: {
-            orderBy: { sortOrder: 'asc' },
+            orderBy: { order: 'asc' },
             include: { dimension: true },
           },
           _count: { select: { businesses: true } },
         },
       }),
-      this.prisma.ratingDimension.findMany({ orderBy: { name: 'asc' } }),
+      this.prisma.ratingDimension.findMany({ orderBy: { label: 'asc' } }),
+      this.prisma.city.findMany({ orderBy: { name: 'asc' } }),
+      this.prisma.business.groupBy({ by: ['cityId'], _count: { _all: true } }),
     ]);
+    const countBy = new Map(cityCounts.map((c) => [c.cityId, c._count._all]));
     return {
       data: {
         categories: categories.map((c) => ({
@@ -716,16 +914,33 @@ export class AdminService {
           slug: c.slug,
           name: c.name,
           description: c.description,
-          isActive: c.isActive,
+          active: c.active,
+          parentSlug: c.parent?.slug ?? null,
           sortOrder: c.sortOrder,
           businessCount: c._count.businesses,
           dimensions: c.dimensions.map((d) => ({
             key: d.dimension.key,
-            name: d.dimension.name,
-            required: d.isRequired,
+            label: d.dimension.label,
+            required: d.required,
+            order: d.order,
           })),
         })),
-        dimensions,
+        dimensions: dimensions.map((d) => ({
+          id: d.id,
+          key: d.key,
+          label: d.label,
+          description: d.description,
+          active: d.active,
+        })),
+        cities: cities.map((c) => ({
+          id: c.id,
+          slug: c.slug,
+          name: c.name,
+          state: c.state,
+          countryCode: c.countryCode,
+          active: c.active,
+          businessCount: countBy.get(c.id) ?? 0,
+        })),
       },
     };
   }
@@ -747,28 +962,36 @@ export class AdminService {
       data: input.map((d, i) => ({
         categoryId,
         dimensionId: byKey.get(d.key)!.id,
-        isRequired: d.required,
-        sortOrder: i + 1,
+        required: d.required,
+        order: i + 1,
       })),
     });
   }
 
+  private async parentId(
+    slug: string | undefined,
+    tx: Prisma.TransactionClient,
+  ): Promise<string | null | undefined> {
+    if (slug === undefined) return undefined;
+    if (slug === '') return null;
+    const parent = await tx.category.findUnique({ where: { slug } });
+    if (!parent)
+      throw new BadRequestException(`Unknown parent category: ${slug}`);
+    return parent.id;
+  }
+
   async createCategory(actor: AuthUser, dto: CreateCategoryDto) {
-    if (
-      await this.prisma.businessCategory.findUnique({
-        where: { slug: dto.slug },
-      })
-    ) {
+    if (await this.prisma.category.findUnique({ where: { slug: dto.slug } }))
       throw new ConflictException('A category with this slug exists');
-    }
     const category = await this.prisma.$transaction(async (tx) => {
-      const c = await tx.businessCategory.create({
+      const c = await tx.category.create({
         data: {
           slug: dto.slug,
           name: dto.name,
           description: dto.description ?? null,
           sortOrder: dto.sortOrder ?? 100,
-          isActive: dto.isActive ?? true,
+          active: dto.active ?? true,
+          parentId: (await this.parentId(dto.parentSlug, tx)) ?? null,
         },
       });
       if (dto.dimensions)
@@ -776,10 +999,10 @@ export class AdminService {
       await this.audit.record(
         this.actor(actor),
         {
-          action: 'taxonomy.category_create',
+          action: 'category.create',
           targetType: 'category',
           targetId: c.id,
-          metadata: { slug: c.slug },
+          after: { slug: c.slug, name: c.name, active: c.active },
         },
         tx,
       );
@@ -788,25 +1011,24 @@ export class AdminService {
     return { data: category };
   }
 
-  /**
-   * Changing a category's dimensions affects new reviews only; existing dimension scores stay
-   * and remain in the breakdown while the dimension is attached to the category.
-   */
-  async updateCategory(actor: AuthUser, slug: string, dto: UpsertCategoryDto) {
-    const existing = await this.prisma.businessCategory.findUnique({
-      where: { slug },
-    });
+  /** Dimension changes apply to new reviews; existing ratings are kept. */
+  async updateCategory(actor: AuthUser, slug: string, dto: UpdateCategoryDto) {
+    const existing = await this.prisma.category.findUnique({ where: { slug } });
     if (!existing) throw new NotFoundException('Category not found');
     const category = await this.prisma.$transaction(async (tx) => {
-      const c = await tx.businessCategory.update({
+      const parentId = await this.parentId(dto.parentSlug, tx);
+      if (parentId === existing.id)
+        throw new BadRequestException('A category cannot be its own parent');
+      const c = await tx.category.update({
         where: { slug },
         data: {
-          name: dto.name,
+          ...(dto.name !== undefined ? { name: dto.name } : {}),
           ...(dto.description !== undefined
             ? { description: dto.description }
             : {}),
           ...(dto.sortOrder !== undefined ? { sortOrder: dto.sortOrder } : {}),
-          ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+          ...(dto.active !== undefined ? { active: dto.active } : {}),
+          ...(parentId !== undefined ? { parentId } : {}),
         },
       });
       if (dto.dimensions)
@@ -814,10 +1036,20 @@ export class AdminService {
       await this.audit.record(
         this.actor(actor),
         {
-          action: 'taxonomy.category_update',
+          action: 'category.update',
           targetType: 'category',
           targetId: c.id,
-          metadata: { fields: Object.keys(dto) },
+          before: {
+            name: existing.name,
+            active: existing.active,
+            parentId: existing.parentId,
+          },
+          after: {
+            name: c.name,
+            active: c.active,
+            parentId: c.parentId,
+            ...(dto.dimensions ? { dimensions: dto.dimensions } : {}),
+          },
         },
         tx,
       );
@@ -829,27 +1061,26 @@ export class AdminService {
   async createDimension(actor: AuthUser, dto: CreateDimensionDto) {
     if (
       await this.prisma.ratingDimension.findUnique({ where: { key: dto.key } })
-    ) {
+    )
       throw new ConflictException('A dimension with this key exists');
-    }
     const d = await this.prisma.ratingDimension.create({
       data: {
         key: dto.key,
-        name: dto.name,
+        label: dto.label,
         description: dto.description ?? null,
-        isActive: dto.isActive ?? true,
+        active: dto.active ?? true,
       },
     });
     await this.audit.record(this.actor(actor), {
-      action: 'taxonomy.dimension_create',
-      targetType: 'dimension',
+      action: 'category.dimension_create',
+      targetType: 'category',
       targetId: d.id,
-      metadata: { key: d.key },
+      after: { key: d.key, label: d.label },
     });
     return { data: d };
   }
 
-  async updateDimension(actor: AuthUser, key: string, dto: UpsertDimensionDto) {
+  async updateDimension(actor: AuthUser, key: string, dto: UpdateDimensionDto) {
     const existing = await this.prisma.ratingDimension.findUnique({
       where: { key },
     });
@@ -857,19 +1088,70 @@ export class AdminService {
     const d = await this.prisma.ratingDimension.update({
       where: { key },
       data: {
-        name: dto.name,
+        ...(dto.label !== undefined ? { label: dto.label } : {}),
         ...(dto.description !== undefined
           ? { description: dto.description }
           : {}),
-        ...(dto.isActive !== undefined ? { isActive: dto.isActive } : {}),
+        ...(dto.active !== undefined ? { active: dto.active } : {}),
       },
     });
     await this.audit.record(this.actor(actor), {
-      action: 'taxonomy.dimension_update',
-      targetType: 'dimension',
+      action: 'category.dimension_update',
+      targetType: 'category',
       targetId: d.id,
-      metadata: { fields: Object.keys(dto) },
+      before: { label: existing.label, active: existing.active },
+      after: { label: d.label, active: d.active },
     });
     return { data: d };
+  }
+
+  /** PRD §5: adding a city is an admin action, no deploy. Audited under target type "category" (§8.5 list). */
+  async createCity(actor: AuthUser, dto: CreateCityDto) {
+    const slug = slugify(dto.name);
+    if (await this.prisma.city.findUnique({ where: { slug } }))
+      throw new ConflictException('A city with this name exists');
+    const city = await this.prisma.city.create({
+      data: {
+        slug,
+        name: cleanText(dto.name),
+        state: cleanText(dto.state),
+        countryCode: dto.countryCode ?? 'NG',
+        active: dto.active ?? true,
+      },
+    });
+    await this.audit.record(this.actor(actor), {
+      action: 'city.create',
+      targetType: 'category',
+      targetId: city.id,
+      after: { slug: city.slug, name: city.name, state: city.state },
+      metadata: { kind: 'city' },
+    });
+    return { data: city };
+  }
+
+  async updateCity(actor: AuthUser, slug: string, dto: UpdateCityDto) {
+    const existing = await this.prisma.city.findUnique({ where: { slug } });
+    if (!existing) throw new NotFoundException('City not found');
+    const city = await this.prisma.city.update({
+      where: { slug },
+      data: {
+        ...(dto.name !== undefined ? { name: cleanText(dto.name) } : {}),
+        ...(dto.state !== undefined ? { state: cleanText(dto.state) } : {}),
+        ...(dto.active !== undefined ? { active: dto.active } : {}),
+      },
+    });
+    await this.audit.record(this.actor(actor), {
+      action: 'city.update',
+      targetType: 'category',
+      targetId: city.id,
+      before: {
+        name: existing.name,
+        state: existing.state,
+        active: existing.active,
+      },
+      after: { name: city.name, state: city.state, active: city.active },
+      metadata: { kind: 'city' },
+    });
+    return { data: city };
   }
 }

@@ -1,9 +1,9 @@
 # TalkGround — Frontend Auth Guide (HttpOnly cookies)
 
 **Audience:** Frontend developers integrating with the TalkGround API
-**API version:** 1.2 (cookie-only auth) · **Last updated:** 17 November 2026
-**Base URL (live):** `https://revyu-backend.onrender.com/api/v1` · **Local:** `http://localhost:3001/api/v1`
-**Swagger:** https://revyu-backend.onrender.com/docs
+**API version:** 2.5 · **Last updated:** 21 November 2026
+**Base URL:** staging `https://<staging-api-host>/api/v1` (sent to you privately) · local `http://localhost:3001/api/v1`
+**Swagger:** `https://<staging-api-host>/docs`
 
 > **TL;DR**
 > 1. Send **every** API request with `credentials: 'include'`.
@@ -33,7 +33,7 @@ The API sets two cookies. JavaScript cannot read either one (`HttpOnly`), which 
 
 | Cookie | Contains | Path | Lifetime | Sent on |
 |---|---|---|---|---|
-| `talkground_at` | Access JWT | `/` | `expiresIn` seconds (15 min recommended; currently 7 days on Render) | Every API request |
+| `talkground_at` | Access JWT | `/` | 15 minutes (`expiresIn` = 900) | Every API request |
 | `talkground_rt` | Refresh token (single-use, rotates) | `/api/v1/auth` | 30 days (`refreshTokenExpiresAt`) | Only `/auth/*` calls |
 
 ```
@@ -83,13 +83,13 @@ Exact DTO fields and validation rules are in Swagger (Schemas → `RegisterDto`,
 ```json
 {
   "data": {
-    "expiresIn": 604800,
+    "expiresIn": 900,
     "refreshTokenExpiresAt": "2026-12-17T13:27:44.240Z",
     "user": {
       "id": "e60d842e-4e61-46cd-af7a-b75fbe73bdfa",
-      "email": "chinedu.okafor@gmail.com",
-      "username": "chinedu_okafor",
-      "displayName": "Chinedu Okafor",
+      "email": "ada@example.com",
+      "username": "ada_n",
+      "displayName": "Ada N.",
       "emailVerified": true,
       "phoneVerified": false,
       "phone": null,
@@ -188,7 +188,7 @@ type User = {
   phone: string | null; avatarUrl: string | null; bio: string | null; location: string | null;
   isStaff: boolean;
   staffRole: { key: string; name: string } | null;
-  permissions: string[]; // e.g. 'REVIEWS_MODERATE' — gate staff UI on these
+  permissions: string[]; // PRD §9 keys, e.g. 'review.moderate' — gate staff UI on these
   createdAt: string;
 };
 
@@ -274,7 +274,7 @@ Browsers only send cookies reliably when the frontend and API are on the **same 
 |---|---|---|
 | **Local dev** | `localhost:3000` → `localhost:3001` | ✅ All browsers. Nothing to configure. |
 | **A. Custom domains (production target)** | `talkground.ng` / `app.talkground.ng` → `api.talkground.ng` | ✅ All browsers, including Safari/iPhone |
-| **B. Different sites (today)** | `*.vercel.app` → `revyu-backend.onrender.com` | ⚠️ Chrome, Edge, Firefox: yes. **Safari (all iPhones) and Brave: no** — they block third-party cookies, so login appears to succeed but the next request is `401` |
+| **B. Different sites (today)** | `*.vercel.app` → `<staging-api-host>` (onrender.com) | ⚠️ Chrome, Edge, Firefox: yes. **Safari (all iPhones) and Brave: no** — they block third-party cookies, so login appears to succeed but the next request is `401` |
 | Local frontend → live Render API | `localhost:3000` → `onrender.com` | ⚠️ Same as B (works in Chrome) |
 
 `vercel.app` and `onrender.com` are both public suffixes, so every `*.vercel.app` URL is its own site — there is no way to share cookies with `onrender.com`.
@@ -289,16 +289,12 @@ Browsers only send cookies reliably when the frontend and API are on the **same 
 ## 7. Swagger
 
 1. Open `/docs`.
-2. Run `POST /auth/login` with the demo account below. The browser stores the cookie.
+2. Run `POST /auth/login` with a test account (staging test logins are shared privately, never in docs). The browser stores the cookie.
 3. Every protected "Try it out" call now works. No **Authorize** step, nothing to paste.
 4. `POST /auth/logout` to sign out.
 
-Generate types: `npx openapi-typescript https://revyu-backend.onrender.com/docs/openapi.json -o src/lib/api-schema.ts`
+Generate types: `npx openapi-typescript https://<staging-api-host>/docs/openapi.json -o src/lib/api-schema.ts`
 
-| Role | Email | Password |
-|---|---|---|
-| User | `chinedu.okafor@gmail.com` | `demo1234` |
-| Admin | `admin@revyu.ng` | `admin123` |
 
 ---
 
@@ -309,7 +305,7 @@ curl doesn't keep cookies unless you give it a jar:
 ```bash
 API=http://localhost:3001/api/v1
 curl -c jar.txt -H 'Origin: http://localhost:3000' -H 'Content-Type: application/json' \
-  -d '{"email":"chinedu.okafor@gmail.com","password":"demo1234"}' $API/auth/login
+  -d '{"email":"YOUR_TEST_EMAIL","password":"YOUR_TEST_PASSWORD"}' $API/auth/login
 curl -b jar.txt $API/users/me                                                 # 200
 curl -b jar.txt -c jar.txt -H 'Origin: http://localhost:3000' -X POST $API/auth/refresh
 curl -b jar.txt -c jar.txt -H 'Origin: http://localhost:3000' -X POST $API/auth/logout
@@ -331,4 +327,4 @@ The `Origin` header is required on `POST`s that carry cookies (see §4.5).
 - [ ] Cloudinary upload uses plain `fetch` without credentials
 - [ ] Your dev/preview/prod URLs sent to backend for `CORS_ORIGIN`
 
-Related: [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) (all endpoints & screens, API v2.0) · [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md)
+Related: [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) (all endpoints & screens, API 2.5) · [API-CHANGELOG-v2.5.md](./API-CHANGELOG-v2.5.md)

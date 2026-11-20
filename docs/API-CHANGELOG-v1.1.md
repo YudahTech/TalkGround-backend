@@ -8,8 +8,8 @@
 > dual mode — follow **[FRONTEND-AUTH.md](./FRONTEND-AUTH.md)** instead. Verification and upload
 > changes in this document still apply.
 
-**Released:** 17 November 2026 · **Base URL unchanged:** `https://revyu-backend.onrender.com/api/v1`
-**Swagger:** https://revyu-backend.onrender.com/docs (version 1.1)
+**Released:** 17 November 2026 · **Base URL unchanged:** `https://<staging-api-host>/api/v1`
+**Swagger:** https://<staging-api-host>/docs (version 1.1)
 
 Existing login/register/Bearer flows keep working. Two areas need frontend work before users can
 post reviews again: **verification screens** and **upload params**. Everything else is additive.

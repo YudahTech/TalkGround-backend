@@ -84,8 +84,7 @@
 
 | Role | Email | Password |
 |---|---|---|
-| Admin | `admin@revyu.ng` | `admin123` |
-| Demo user | `chinedu.okafor@gmail.com` | `demo1234` |
+| Demo user | `a seeded demo account` | <demo password, shared privately> |
 
 ---
 

@@ -61,7 +61,6 @@ export function readCookie(req: Request, name: string): string | undefined {
 export function withoutTokens<T extends Session>(
   session: T,
 ): Omit<T, 'accessToken' | 'refreshToken'> {
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const { accessToken, refreshToken, ...rest } = session;
   return rest;
 }

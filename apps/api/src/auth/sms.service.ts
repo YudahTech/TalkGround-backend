@@ -26,8 +26,8 @@ export class SmsService {
   }
 
   async sendOtp(phone: string, code: string): Promise<boolean> {
-    const apiKey = this.config.get('TERMII_API_KEY');
-    const senderId = this.config.get('TERMII_SENDER_ID', 'TalkGround');
+    const apiKey = this.config.get<string>('TERMII_API_KEY');
+    const senderId = this.config.get<string>('TERMII_SENDER_ID', 'TalkGround');
 
     if (!apiKey) {
       this.logger.warn(

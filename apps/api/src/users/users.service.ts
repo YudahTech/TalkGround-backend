@@ -5,15 +5,17 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { ClaimStatus, ReviewStatus, VoteValue } from '@prisma/client';
+import { ClaimStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuthService } from '../auth/auth.service';
 import { AuditService } from '../audit/audit.service';
 import { RatingsService } from '../businesses/ratings.service';
-import { PUBLIC_REVIEW_STATUSES } from '../common/rating-rules';
+import { RevalidationService } from '../revalidation/revalidation.service';
+import { VISIBLE_REVIEW_WHERE } from '../common/rating-rules';
 import { randomToken } from '../common/security';
 import { cleanText, excerpt } from '../common/utils';
 import type { UpdateProfileDto } from './users.dto';
+import type { PublicProfileDto } from './users.responses';
 
 @Injectable()
 export class UsersService {
@@ -22,6 +24,7 @@ export class UsersService {
     private auth: AuthService,
     private audit: AuditService,
     private ratings: RatingsService,
+    private revalidate: RevalidationService,
   ) {}
 
   async getMe(userId: string) {
@@ -58,27 +61,33 @@ export class UsersService {
           : {}),
       },
     });
+    if (dto.displayName !== undefined || dto.avatarUrl !== undefined) {
+      const reviewed = await this.prisma.review.findMany({
+        where: { userId },
+        select: { businessId: true },
+        distinct: ['businessId'],
+      });
+      void this.revalidate.businesses(reviewed.map((r) => r.businessId));
+    }
     return { data: await this.auth.sanitizeUser(user) };
   }
 
   /**
-   * NDPA right to erasure. Personal data is wiped and the account can never log in again.
-   * Reviews are withdrawn from public view (ratings recomputed); business access is revoked;
-   * the row stays, anonymised, so moderation and audit records keep their references.
+   * NDPA right to erasure. Personal data is wiped and the account can never log in again. Reviews
+   * are soft-deleted (they disappear from public pages and structured data, PRD §7.13) and ratings
+   * recomputed; business access is revoked; pending claims are rejected. The row stays, anonymised,
+   * so moderation and audit records keep their references.
    */
   async deleteMe(userId: string, password: string) {
-    const user = await this.prisma.user.findUnique({ where: { id: userId } });
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      include: { adminRole: true },
+    });
     if (!user || user.deletedAt) throw new NotFoundException('User not found');
-    if (!(await bcrypt.compare(password, user.passwordHash))) {
+    if (!(await bcrypt.compare(password, user.passwordHash)))
       throw new UnauthorizedException('Password is incorrect');
-    }
     const affected = await this.prisma.review.findMany({
-      where: {
-        userId,
-        status: {
-          in: [...PUBLIC_REVIEW_STATUSES, ReviewStatus.PENDING_MODERATION],
-        },
-      },
+      where: { userId },
       select: { businessId: true },
       distinct: ['businessId'],
     });
@@ -86,11 +95,8 @@ export class UsersService {
     const passwordHash = await bcrypt.hash(randomToken(), 4);
     await this.prisma.$transaction(async (tx) => {
       await tx.review.updateMany({
-        where: {
-          userId,
-          status: { notIn: [ReviewStatus.REMOVED, ReviewStatus.WITHDRAWN] },
-        },
-        data: { status: ReviewStatus.WITHDRAWN, activeKey: null },
+        where: { userId, deletedAt: null },
+        data: { deletedAt: new Date(), activeKey: null },
       });
       await tx.helpfulVote.deleteMany({ where: { userId } });
       await tx.otpCode.deleteMany({ where: { userId } });
@@ -100,8 +106,13 @@ export class UsersService {
         data: { revokedAt: new Date() },
       });
       await tx.businessClaim.updateMany({
-        where: { claimantId: userId, status: ClaimStatus.PENDING },
-        data: { status: ClaimStatus.CANCELLED, pendingKey: null },
+        where: { userId, status: ClaimStatus.PENDING },
+        data: {
+          status: ClaimStatus.REJECTED,
+          pendingKey: null,
+          decisionReason: 'The account was deleted.',
+          decidedAt: new Date(),
+        },
       });
       await tx.user.update({
         where: { id: userId },
@@ -126,8 +137,15 @@ export class UsersService {
     await this.auth.revokeAllSessions(userId);
     await this.audit.record(
       { id: userId },
-      { action: 'user.self_delete', targetType: 'user', targetId: userId },
+      {
+        action: 'user.self_delete',
+        targetType: 'user',
+        targetId: userId,
+        before: { staffRole: user.adminRole?.key ?? null },
+        after: { deleted: true },
+      },
     );
+    void this.revalidate.businesses(affected.map((a) => a.businessId));
     return {
       data: { message: 'Your account and personal data have been deleted.' },
     };
@@ -155,34 +173,26 @@ export class UsersService {
             overallRating: true,
             title: true,
             body: true,
-            experienceDate: true,
+            recommend: true,
             status: true,
             resolutionStatus: true,
             createdAt: true,
             editedAt: true,
+            deletedAt: true,
             business: { select: { name: true, slug: true } },
-            dimensions: {
-              select: { score: true, dimension: { select: { key: true } } },
+            dimensionRatings: {
+              select: { value: true, dimension: { select: { key: true } } },
             },
-            evidence: { select: { kind: true, status: true, createdAt: true } },
-            revisions: {
-              select: {
-                overallRating: true,
-                title: true,
-                body: true,
-                createdAt: true,
-              },
-            },
+            evidence: { select: { type: true, createdAt: true } },
+            revisions: { select: { snapshot: true, createdAt: true } },
           },
         },
-        helpfulVotes: {
-          select: { reviewId: true, value: true, createdAt: true },
-        },
+        helpfulVotes: { select: { reviewId: true, createdAt: true } },
         reports: {
           select: {
             reviewId: true,
-            reason: true,
-            details: true,
+            reasonCode: true,
+            note: true,
             status: true,
             createdAt: true,
           },
@@ -210,8 +220,10 @@ export class UsersService {
     return { data: { exportedAt: new Date(), ...user } };
   }
 
-  /** PRD §7.1: only what the user chose to display. Never email, phone or verification details. */
-  async getPublicProfile(username: string) {
+  /** PRD §7.1/§7.13: only what the user chose to display. Never email or phone. */
+  async getPublicProfile(
+    username: string,
+  ): Promise<{ data: PublicProfileDto }> {
     const user = await this.prisma.user.findUnique({
       where: { username },
       select: {
@@ -224,14 +236,12 @@ export class UsersService {
         deletedAt: true,
         suspended: true,
         reviews: {
-          where: { status: { in: PUBLIC_REVIEW_STATUSES } },
+          where: VISIBLE_REVIEW_WHERE,
           orderBy: { createdAt: 'desc' },
           take: 50,
           include: {
             business: { select: { name: true, slug: true } },
-            _count: {
-              select: { helpfulVotes: { where: { value: VoteValue.HELPFUL } } },
-            },
+            _count: { select: { helpfulVotes: true } },
           },
         },
       },
@@ -253,7 +263,6 @@ export class UsersService {
           title: r.title,
           excerpt: excerpt(r.body, 240),
           helpfulCount: r._count.helpfulVotes,
-          earlierExperience: !!r.supersededAt,
           createdAt: r.createdAt,
           business: r.business,
         })),

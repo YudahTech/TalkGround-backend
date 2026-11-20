@@ -4,8 +4,9 @@ import { BusinessesService } from './businesses.service';
 import { BusinessWriterService } from './business-writer.service';
 import { RatingsService } from './ratings.service';
 import { BusinessAccessService } from './business-access.service';
+import { SeoService } from './seo.service';
 
-/** Global: ratings, writes and access checks are used by reviews, claims, portal and admin. */
+/** Global: ratings, writes, SEO and access checks are used by reviews, claims, portal and admin. */
 @Global()
 @Module({
   controllers: [BusinessesController],
@@ -14,12 +15,14 @@ import { BusinessAccessService } from './business-access.service';
     BusinessWriterService,
     RatingsService,
     BusinessAccessService,
+    SeoService,
   ],
   exports: [
     BusinessesService,
     BusinessWriterService,
     RatingsService,
     BusinessAccessService,
+    SeoService,
   ],
 })
 export class BusinessesModule {}

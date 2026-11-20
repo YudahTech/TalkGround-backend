@@ -1,27 +1,36 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  ELIGIBLE_REVIEW_WHERE,
-  ratingSummary,
-  roundRating,
-} from '../common/rating-rules';
+import { AppConfig } from '../common/app-config';
+import { RATED_REVIEW_WHERE, ratingSummary } from '../common/rating-rules';
+import type {
+  DimensionAverageDto,
+  RatingCompactDto,
+  RatingSummaryDto,
+} from './businesses.responses';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
 export type Distribution = Record<'1' | '2' | '3' | '4' | '5', number>;
 
 /**
- * The only place ratings are calculated (PRD §7.12, acceptance criterion 13).
- * Every write that can change eligibility calls recompute() in the same transaction, and the
- * values are always derived from the review rows — never incremented — so they cannot drift.
+ * The only place ratings are calculated (PRD v2.5 §7.12). Every write that can change which
+ * reviews are PUBLISHED calls recompute() in the same transaction; values are always derived
+ * from the review rows, never incremented, so they cannot drift.
  */
 @Injectable()
 export class RatingsService {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    private prisma: PrismaService,
+    private appConfig: AppConfig,
+  ) {}
+
+  get minReviews() {
+    return this.appConfig.minReviewsForRating;
+  }
 
   async recompute(businessId: string, db: Db = this.prisma) {
-    const where = { businessId, ...ELIGIBLE_REVIEW_WHERE };
+    const where = { businessId, ...RATED_REVIEW_WHERE };
     const [agg, groups] = await Promise.all([
       db.review.aggregate({
         where,
@@ -50,46 +59,52 @@ export class RatingsService {
     return { reviewCount: agg._count._all, average: agg._avg.overallRating };
   }
 
-  /** Average and count per dimension, over eligible reviews (PRD §7.12 "dimension ratings"). */
-  async dimensionBreakdown(businessId: string, categoryId: string) {
+  /** Average per dimension, over published reviews that rated it (§7.12). */
+  async dimensionBreakdown(
+    businessId: string,
+    categoryId: string,
+  ): Promise<DimensionAverageDto[]> {
     const [configured, stats] = await Promise.all([
       this.prisma.categoryDimension.findMany({
-        where: { categoryId, dimension: { isActive: true } },
-        orderBy: { sortOrder: 'asc' },
+        where: { categoryId, dimension: { active: true } },
+        orderBy: { order: 'asc' },
         include: { dimension: true },
       }),
-      this.prisma.reviewDimension.groupBy({
+      this.prisma.reviewDimensionRating.groupBy({
         by: ['dimensionId'],
-        where: { review: { businessId, ...ELIGIBLE_REVIEW_WHERE } },
-        _avg: { score: true },
+        where: { review: { businessId, ...RATED_REVIEW_WHERE } },
+        _avg: { value: true },
         _count: { _all: true },
       }),
     ]);
     const byId = new Map(stats.map((s) => [s.dimensionId, s]));
     return configured.map(({ dimension }) => {
       const s = byId.get(dimension.id);
-      const count = s?._count._all ?? 0;
-      const summary = ratingSummary(count, s?._avg.score ?? null);
+      const summary = ratingSummary(
+        s?._count._all ?? 0,
+        s?._avg.value ?? null,
+        this.minReviews,
+      );
       return {
         key: dimension.key,
-        name: dimension.name,
-        reviewCount: count,
+        label: dimension.label,
+        reviewCount: summary.reviewCount,
         average: summary.average,
         sufficientData: summary.sufficientData,
       };
     });
   }
 
-  /** Public rating block for a business row. */
+  /** Full rating block: summary + distribution (counts for 1 to 5 are always exposed). */
   summary(business: {
     reviewCount: number;
     ratingAverage: number | null;
     ratingDistribution: Prisma.JsonValue;
-  }) {
+  }): Omit<RatingSummaryDto, 'dimensions'> {
     const distribution = (business.ratingDistribution ?? {}) as Distribution;
     const total = business.reviewCount;
     return {
-      ...ratingSummary(total, business.ratingAverage),
+      ...ratingSummary(total, business.ratingAverage, this.minReviews),
       distribution: (['5', '4', '3', '2', '1'] as const).map((stars) => ({
         stars: Number(stars),
         count: distribution[stars] ?? 0,
@@ -100,9 +115,15 @@ export class RatingsService {
     };
   }
 
-  /** Compact rating for search results and lists. */
-  compact(business: { reviewCount: number; ratingAverage: number | null }) {
-    const s = ratingSummary(business.reviewCount, business.ratingAverage);
+  compact(business: {
+    reviewCount: number;
+    ratingAverage: number | null;
+  }): RatingCompactDto {
+    const s = ratingSummary(
+      business.reviewCount,
+      business.ratingAverage,
+      this.minReviews,
+    );
     return {
       reviewCount: s.reviewCount,
       average: s.average,
@@ -110,6 +131,4 @@ export class RatingsService {
       message: s.message,
     };
   }
-
-  round = roundRating;
 }

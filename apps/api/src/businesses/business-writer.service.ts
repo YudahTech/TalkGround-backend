@@ -5,26 +5,26 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  BusinessSource,
   BusinessStatus,
+  ClaimStatus,
   IdentifierType,
-  LocationType,
+  ListingSource,
   OwnershipStatus,
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   identifierSearchTerms,
-  identifierUniqueKey,
   normalizeDomain,
   normalizeIdentifier,
   normalizeName,
   normalizeNigerianPhone,
 } from '../common/identifiers';
-import { normalizeState, stateName } from '../common/nigeria';
 import { cleanText, slugify } from '../common/utils';
 import { RatingsService } from './ratings.service';
-import type { IdentifierInputDto, LocationInputDto } from './businesses.dto';
+import { assertTransition } from './lifecycle';
+import type { IdentifierInputDto, LocationFieldsDto } from './businesses.dto';
+import type { DuplicateCandidateDto } from './businesses.responses';
 
 type Db = Prisma.TransactionClient | PrismaService;
 
@@ -32,35 +32,29 @@ export interface PreparedIdentifier {
   type: IdentifierType;
   value: string;
   normalizedValue: string;
-  uniqueKey: string | null;
-}
-
-export interface DuplicateCandidate {
-  id: string;
-  slug: string;
-  name: string;
-  status: string;
-  reasons: string[];
 }
 
 export interface NewBusinessInput {
   name: string;
   categoryId: string;
+  cityId: string | null;
+  area: string | null;
+  onlineOnly: boolean;
   description?: string | null;
   logoUrl?: string | null;
   website?: string | null;
   publicEmail?: string | null;
   publicPhone?: string | null;
   identifiers?: IdentifierInputDto[];
-  locations?: LocationInputDto[];
   status: BusinessStatus;
-  source: BusinessSource;
+  createdBySource: ListingSource;
   createdById?: string | null;
 }
 
 /**
- * Every write that creates or reshapes a listing goes through here, so identifier
- * normalisation, duplicate detection (PRD §7.2, §7.3) and the search index stay consistent.
+ * Every write that creates or reshapes a listing goes through here, so identifier normalisation,
+ * duplicate signals (PRD v2.5 §13), slugs and their history (§7.13) and the search index stay
+ * consistent.
  */
 @Injectable()
 export class BusinessWriterService {
@@ -71,14 +65,57 @@ export class BusinessWriterService {
 
   // ─────────────────────────────────────────────────────────────── inputs
 
-  async categoryIdBySlug(slug: string, db: Db = this.prisma): Promise<string> {
-    const category = await db.businessCategory.findUnique({
+  async categoryIdBySlug(
+    slug: string,
+    db: Db = this.prisma,
+    allowInactive = false,
+  ): Promise<string> {
+    const category = await db.category.findUnique({
       where: { slug: slug.trim().toLowerCase() },
     });
-    if (!category || !category.isActive) {
+    if (!category || (!category.active && !allowInactive)) {
       throw new BadRequestException(`Unknown category: ${slug}`);
     }
     return category.id;
+  }
+
+  /** City slug + area, or online only (PRD §7.3). */
+  async resolveLocation(
+    input: LocationFieldsDto,
+    db: Db = this.prisma,
+    current?: {
+      cityId: string | null;
+      area: string | null;
+      onlineOnly: boolean;
+    },
+  ): Promise<{
+    cityId: string | null;
+    area: string | null;
+    onlineOnly: boolean;
+  }> {
+    const onlineOnly = input.onlineOnly ?? current?.onlineOnly ?? false;
+    // An update that does not mention the city keeps the current one.
+    let cityId: string | null =
+      input.city === undefined ? (current?.cityId ?? null) : null;
+    if (input.city) {
+      const city = await db.city.findUnique({ where: { slug: input.city } });
+      if (!city || !city.active) {
+        throw new BadRequestException(
+          `Unknown city: ${input.city} (see GET /cities)`,
+        );
+      }
+      cityId = city.id;
+    }
+    if (!cityId && !onlineOnly) {
+      throw new BadRequestException('Choose a city, or set onlineOnly: true');
+    }
+    const area =
+      input.area !== undefined
+        ? input.area
+          ? cleanText(input.area)
+          : null
+        : (current?.area ?? null);
+    return { cityId, area, onlineOnly };
   }
 
   prepareIdentifiers(input: IdentifierInputDto[] = []): PreparedIdentifier[] {
@@ -93,39 +130,12 @@ export class BusinessWriterService {
         type: item.type,
         value: cleanText(item.value).slice(0, 200),
         normalizedValue,
-        uniqueKey: identifierUniqueKey(item.type, normalizedValue),
       });
     }
     return out;
   }
 
-  prepareLocations(input: LocationInputDto[] = []) {
-    return input.map((loc, index) => {
-      const nationwide = loc.nationwide ?? false;
-      const state = loc.state ? normalizeState(loc.state) : null;
-      if (loc.state && !state) {
-        throw new BadRequestException(
-          `Unknown Nigerian state: ${loc.state} (see GET /locations)`,
-        );
-      }
-      if (!state && !nationwide) {
-        throw new BadRequestException(
-          'Each location needs a state, or nationwide: true',
-        );
-      }
-      return {
-        type: loc.type ?? LocationType.ADDRESS,
-        addressLine: loc.addressLine ? cleanText(loc.addressLine) : null,
-        area: loc.area ? cleanText(loc.area) : null,
-        city: loc.city ? cleanText(loc.city) : null,
-        state,
-        nationwide,
-        isPrimary: loc.isPrimary ?? index === 0,
-      };
-    });
-  }
-
-  /** Website/phone/email fields are also identifiers, so they take part in duplicate checks. */
+  /** Website/phone/email profile fields are also identifiers, so they feed search and duplicate checks. */
   profileFieldIdentifiers(fields: {
     website?: string | null;
     publicPhone?: string | null;
@@ -143,69 +153,72 @@ export class BusinessWriterService {
       }
       out.push({ type: IdentifierType.PHONE, value: fields.publicPhone });
     }
-    if (fields.publicEmail) {
+    if (fields.publicEmail)
       out.push({ type: IdentifierType.EMAIL, value: fields.publicEmail });
-    }
     return out;
   }
 
-  // ────────────────────────────────────────────────────── duplicate detection
-
-  /** Identifiers that already belong to another listing. These are hard conflicts. */
-  async identifierConflicts(
-    identifiers: PreparedIdentifier[],
-    excludeBusinessId?: string,
-    db: Db = this.prisma,
-  ) {
-    const keys = identifiers
-      .map((i) => i.uniqueKey)
-      .filter((k): k is string => !!k);
-    if (!keys.length) return [];
-    return db.businessIdentifier.findMany({
-      where: {
-        uniqueKey: { in: keys },
-        ...(excludeBusinessId
-          ? { businessId: { not: excludeBusinessId } }
-          : {}),
-      },
-      include: {
-        business: {
-          select: { id: true, slug: true, name: true, status: true },
-        },
-      },
-    });
-  }
+  // ─────────────────────────────────────────────── duplicate signals (never rejections)
 
   /**
-   * Listings that may be the same real business: same unique identifier (strong), same or
-   * very similar name (trigram similarity), or matching alternative name.
+   * Listings that may be the same real business: a matching identifier (social handles are the
+   * strongest signal), or a very similar name. Staff decide; nothing is rejected or merged here.
    */
   async findDuplicateCandidates(input: {
     name: string;
     identifiers?: PreparedIdentifier[];
     excludeBusinessId?: string;
-  }): Promise<DuplicateCandidate[]> {
-    const found = new Map<string, DuplicateCandidate>();
+    db?: Db;
+  }): Promise<DuplicateCandidateDto[]> {
+    const db = input.db ?? this.prisma;
+    const found = new Map<string, DuplicateCandidateDto>();
     const add = (
       b: { id: string; slug: string; name: string; status: string },
       reason: string,
     ) => {
       if (b.id === input.excludeBusinessId) return;
-      const entry = found.get(b.id) ?? { ...b, reasons: [] };
+      const entry = found.get(b.id) ?? {
+        id: b.id,
+        slug: b.slug,
+        name: b.name,
+        status: b.status.toLowerCase(),
+        reasons: [],
+      };
       if (!entry.reasons.includes(reason)) entry.reasons.push(reason);
       found.set(b.id, entry);
     };
+    const live = {
+      notIn: [
+        BusinessStatus.MERGED,
+        BusinessStatus.ARCHIVED,
+        BusinessStatus.REJECTED,
+      ],
+    };
 
-    for (const c of await this.identifierConflicts(
-      input.identifiers ?? [],
-      input.excludeBusinessId,
-    )) {
-      add(c.business, `same ${c.type.toLowerCase()} (${c.normalizedValue})`);
+    const ids = input.identifiers ?? [];
+    if (ids.length) {
+      const matches = await db.businessIdentifier.findMany({
+        where: {
+          OR: ids.map((i) => ({
+            type: i.type,
+            normalizedValue: i.normalizedValue,
+          })),
+          business: { status: live },
+        },
+        include: {
+          business: {
+            select: { id: true, slug: true, name: true, status: true },
+          },
+        },
+        take: 50,
+      });
+      for (const m of matches)
+        add(m.business, `same ${m.type.toLowerCase()} (${m.normalizedValue})`);
     }
 
     const normalized = normalizeName(input.name);
     if (normalized) {
-      const similar = await this.prisma.$queryRaw<
+      const similar = await db.$queryRaw<
         {
           id: string;
           slug: string;
@@ -214,23 +227,19 @@ export class BusinessWriterService {
           sim: number;
         }[]
       >`
-        SELECT id, slug, name, status::text AS status,
-               similarity(lower(name), ${normalized}) AS sim
+        SELECT id, slug, name, status::text AS status, similarity(lower(name), ${normalized}) AS sim
         FROM "Business"
-        WHERE status NOT IN ('MERGED', 'ARCHIVED')
+        WHERE status NOT IN ('MERGED', 'ARCHIVED', 'REJECTED')
           AND similarity(lower(name), ${normalized}) > 0.45
         ORDER BY sim DESC
         LIMIT 10`;
       for (const s of similar)
         add(s, `similar name (${Math.round(s.sim * 100)}%)`);
-
-      const alt = await this.prisma.businessIdentifier.findMany({
+      const alt = await db.businessIdentifier.findMany({
         where: {
-          type: IdentifierType.ALTERNATIVE_NAME,
+          type: IdentifierType.ALT_NAME,
           normalizedValue: normalized,
-          business: {
-            status: { notIn: [BusinessStatus.MERGED, BusinessStatus.ARCHIVED] },
-          },
+          business: { status: live },
         },
         include: {
           business: {
@@ -244,48 +253,97 @@ export class BusinessWriterService {
     return [...found.values()];
   }
 
-  // ───────────────────────────────────────────────────────────────── writes
+  // ─────────────────────────────────────────────────────────────── slugs
 
-  async uniqueSlug(name: string, db: Db = this.prisma): Promise<string> {
-    const base = slugify(name) || 'business';
-    let slug = base;
-    for (let i = 2; await db.business.findUnique({ where: { slug } }); i++) {
-      slug = `${base}-${i}`;
-    }
-    return slug;
+  private async slugTaken(slug: string, db: Db) {
+    const [b, h] = await Promise.all([
+      db.business.findUnique({ where: { slug }, select: { id: true } }),
+      db.businessSlugHistory.findUnique({
+        where: { oldSlug: slug },
+        select: { id: true },
+      }),
+    ]);
+    return !!b || !!h;
   }
 
   /**
-   * Create a listing with its identifiers and locations. Throws 409 when an identifier
-   * already belongs to another listing — the right fix is a merge, not a second listing.
+   * Lowercase, URL-safe, unique across current AND historical slugs (never reused). On conflict the
+   * area (or city) is added, then a number (PRD §7.13). Admins never type slugs.
    */
+  async uniqueSlug(
+    name: string,
+    hint: string | null,
+    db: Db = this.prisma,
+  ): Promise<string> {
+    const base = slugify(name) || 'business';
+    if (!(await this.slugTaken(base, db))) return base;
+    const withHint = hint ? `${base}-${slugify(hint)}` : base;
+    if (hint && !(await this.slugTaken(withHint, db))) return withHint;
+    for (let i = 2; ; i++) {
+      const candidate = `${withHint}-${i}`;
+      if (!(await this.slugTaken(candidate, db))) return candidate;
+    }
+  }
+
+  private async locationHint(
+    cityId: string | null,
+    area: string | null,
+    db: Db,
+  ) {
+    if (area) return area;
+    if (!cityId) return null;
+    return (
+      (
+        await db.city.findUnique({
+          where: { id: cityId },
+          select: { name: true },
+        })
+      )?.name ?? null
+    );
+  }
+
+  /** Rename: new slug, old slug kept in history so it 301s forever. */
+  async rename(businessId: string, name: string, db: Db = this.prisma) {
+    const b = await db.business.findUniqueOrThrow({
+      where: { id: businessId },
+    });
+    const clean = cleanText(name);
+    if (clean === b.name) return b.slug;
+    const slug = await this.uniqueSlug(
+      clean,
+      await this.locationHint(b.cityId, b.area, db),
+      db,
+    );
+    await db.businessSlugHistory.create({
+      data: { businessId, oldSlug: b.slug },
+    });
+    await db.business.update({
+      where: { id: businessId },
+      data: { name: clean, slug },
+    });
+    return slug;
+  }
+
+  // ─────────────────────────────────────────────────────────────── writes
+
   async create(input: NewBusinessInput, db: Db = this.prisma) {
     const identifiers = this.prepareIdentifiers([
       ...(input.identifiers ?? []),
       ...this.profileFieldIdentifiers(input),
     ]);
-    const conflicts = await this.identifierConflicts(
-      identifiers,
-      undefined,
-      db,
-    );
-    if (conflicts.length) {
-      throw new ConflictException({
-        message: 'An identifier already belongs to another listing',
-        conflicts: conflicts.map((c) => ({
-          type: c.type,
-          value: c.normalizedValue,
-          business: c.business,
-        })),
-      });
-    }
-    const locations = this.prepareLocations(input.locations);
-
+    const name = cleanText(input.name);
     const business = await db.business.create({
       data: {
-        slug: await this.uniqueSlug(input.name, db),
-        name: cleanText(input.name),
+        slug: await this.uniqueSlug(
+          name,
+          await this.locationHint(input.cityId, input.area, db),
+          db,
+        ),
+        name,
         categoryId: input.categoryId,
+        cityId: input.cityId,
+        area: input.area,
+        onlineOnly: input.onlineOnly,
         description: input.description ? cleanText(input.description) : null,
         logoUrl: input.logoUrl ?? null,
         website: input.website ?? null,
@@ -294,33 +352,18 @@ export class BusinessWriterService {
           ? normalizeNigerianPhone(input.publicPhone)
           : null,
         status: input.status,
-        source: input.source,
+        createdBySource: input.createdBySource,
         createdById: input.createdById ?? null,
         publishedAt:
           input.status === BusinessStatus.PUBLISHED ? new Date() : null,
         identifiers: { create: identifiers },
-        locations: { create: locations },
       },
     });
     await this.rebuildSearchText(business.id, db);
     return business;
   }
 
-  async replaceLocations(
-    businessId: string,
-    locations: LocationInputDto[],
-    db: Db = this.prisma,
-  ) {
-    const prepared = this.prepareLocations(locations);
-    await db.businessLocation.deleteMany({ where: { businessId } });
-    if (prepared.length) {
-      await db.businessLocation.createMany({
-        data: prepared.map((l) => ({ ...l, businessId })),
-      });
-    }
-  }
-
-  /** Keep the profile-field identifiers (website/phone/email) in sync with the profile columns. */
+  /** Keep website/phone/email identifiers in sync with the profile columns. */
   async syncProfileIdentifiers(
     businessId: string,
     fields: {
@@ -330,34 +373,20 @@ export class BusinessWriterService {
     },
     db: Db = this.prisma,
   ) {
-    const pairs: [IdentifierType, string | null | undefined][] = [
-      [IdentifierType.WEBSITE, fields.website],
-      [IdentifierType.PHONE, fields.publicPhone],
-      [IdentifierType.EMAIL, fields.publicEmail],
-    ];
-    for (const [type, value] of pairs) {
-      if (value === undefined) continue;
-      if (!value) continue; // clearing a profile field keeps the identifier (still useful for search)
-      const [prepared] = this.prepareIdentifiers([{ type, value }]);
-      if (!prepared) continue;
-      const conflicts = await this.identifierConflicts(
-        [prepared],
-        businessId,
-        db,
-      );
-      if (conflicts.length) {
-        throw new ConflictException(
-          `That ${type.toLowerCase()} already belongs to another listing (${conflicts[0].business.name})`,
-        );
-      }
-      const exists = await db.businessIdentifier.findFirst({
-        where: { businessId, type, normalizedValue: prepared.normalizedValue },
+    for (const ident of this.prepareIdentifiers(
+      this.profileFieldIdentifiers(fields),
+    )) {
+      await db.businessIdentifier.upsert({
+        where: {
+          businessId_type_normalizedValue: {
+            businessId,
+            type: ident.type,
+            normalizedValue: ident.normalizedValue,
+          },
+        },
+        create: { ...ident, businessId },
+        update: {},
       });
-      if (!exists) {
-        await db.businessIdentifier.create({
-          data: { ...prepared, businessId },
-        });
-      }
     }
   }
 
@@ -367,30 +396,37 @@ export class BusinessWriterService {
     db: Db = this.prisma,
   ) {
     const [prepared] = this.prepareIdentifiers([input]);
-    const conflicts = await this.identifierConflicts(
-      [prepared],
-      businessId,
-      db,
-    );
-    if (conflicts.length) {
-      throw new ConflictException({
-        message: `That ${prepared.type.toLowerCase()} already belongs to another listing`,
-        conflicts: conflicts.map((c) => ({ business: c.business })),
-      });
-    }
-    const existing = await db.businessIdentifier.findFirst({
+    const row = await db.businessIdentifier.upsert({
       where: {
-        businessId,
-        type: prepared.type,
-        normalizedValue: prepared.normalizedValue,
+        businessId_type_normalizedValue: {
+          businessId,
+          type: prepared.type,
+          normalizedValue: prepared.normalizedValue,
+        },
       },
-    });
-    if (existing) return existing;
-    const created = await db.businessIdentifier.create({
-      data: { ...prepared, businessId },
+      create: { ...prepared, businessId },
+      update: {},
     });
     await this.rebuildSearchText(businessId, db);
-    return created;
+    const others = await db.businessIdentifier.findMany({
+      where: {
+        type: prepared.type,
+        normalizedValue: prepared.normalizedValue,
+        businessId: { not: businessId },
+        business: {
+          status: {
+            notIn: [
+              BusinessStatus.MERGED,
+              BusinessStatus.ARCHIVED,
+              BusinessStatus.REJECTED,
+            ],
+          },
+        },
+      },
+      include: { business: { select: { id: true, slug: true, name: true } } },
+    });
+    // A shared identifier is allowed; it is returned as a duplicate signal for staff (§13).
+    return { identifier: row, alsoUsedBy: others.map((o) => o.business) };
   }
 
   async removeIdentifier(
@@ -405,20 +441,23 @@ export class BusinessWriterService {
     await this.rebuildSearchText(businessId, db);
   }
 
-  /** Regenerate Business.searchText; a DB trigger turns it into the weighted tsvector. */
+  /** Regenerate Business.searchText (a DB trigger turns it into the weighted tsvector). */
   async rebuildSearchText(businessId: string, db: Db = this.prisma) {
     const b = await db.business.findUniqueOrThrow({
       where: { id: businessId },
-      include: { identifiers: true, locations: true, category: true },
+      include: { identifiers: true, category: true, city: true },
     });
     const parts = [
       b.name,
       normalizeName(b.name),
       b.category.name,
+      b.city?.name,
+      b.city?.state,
+      b.area,
+      b.onlineOnly ? 'online' : null,
       ...b.identifiers.map((i) =>
         identifierSearchTerms(i.type, i.value, i.normalizedValue),
       ),
-      ...b.locations.flatMap((l) => [l.area, l.city, stateName(l.state)]),
     ].filter((p): p is string => !!p);
     const searchText = [...new Set(parts.map((p) => p.toLowerCase()))].join(
       ' ',
@@ -432,94 +471,92 @@ export class BusinessWriterService {
   // ─────────────────────────────────────────────────────────────────── merge
 
   /**
-   * Merge a duplicate listing into the canonical one (PRD §7.4 "merged", §8.5 audit).
-   * Moves identifiers, locations, reviews, responses, disputes, claims and managers; the
-   * source keeps its row (status MERGED, mergedIntoId) so old links can redirect.
-   * A reviewer with a current review on both keeps the newer one current; the older becomes
-   * an "earlier experience" so the merged business never double-counts one person.
+   * Merge a duplicate into the listing to keep (PRD §7.4). Reviews, identifiers, responses,
+   * disputes, claims and members move to the target; the source becomes MERGED and its URL
+   * 301s to the target. If one person has an active review on both, the newer stays active and
+   * the older is soft-deleted (kept for moderation), preserving "one active review per business".
    */
   async merge(sourceId: string, targetId: string) {
-    if (sourceId === targetId) {
+    if (sourceId === targetId)
       throw new BadRequestException('Cannot merge a business into itself');
-    }
     return this.prisma.$transaction(
       async (tx) => {
         const [source, target] = await Promise.all([
           tx.business.findUnique({
             where: { id: sourceId },
-            include: { identifiers: true, locations: true },
-          }),
-          tx.business.findUnique({
-            where: { id: targetId },
             include: { identifiers: true },
           }),
+          tx.business.findUnique({ where: { id: targetId } }),
         ]);
         if (!source || !target)
           throw new NotFoundException('Business not found');
-        if (source.status === BusinessStatus.MERGED) {
-          throw new ConflictException('Source business was already merged');
-        }
+        assertTransition(source.status, BusinessStatus.MERGED);
         if (
-          target.status === BusinessStatus.MERGED ||
-          target.status === BusinessStatus.ARCHIVED
+          target.status !== BusinessStatus.PUBLISHED &&
+          target.status !== BusinessStatus.SUSPENDED
         ) {
-          throw new BadRequestException('Target must be an active listing');
+          throw new BadRequestException(
+            'The business to keep must be published or suspended',
+          );
         }
 
-        // Identifiers: move what the target lacks; drop exact duplicates.
-        const targetKeys = new Set(
-          target.identifiers.map((i) => `${i.type}:${i.normalizedValue}`),
-        );
         for (const ident of source.identifiers) {
-          if (targetKeys.has(`${ident.type}:${ident.normalizedValue}`)) {
-            await tx.businessIdentifier.delete({ where: { id: ident.id } });
-          } else {
-            await tx.businessIdentifier.update({
-              where: { id: ident.id },
-              data: { businessId: targetId },
-            });
-          }
-        }
-        // The duplicate's name stays findable as an alternative name of the target.
-        const altName = normalizeName(source.name);
-        if (
-          altName !== normalizeName(target.name) &&
-          !targetKeys.has(`ALTERNATIVE_NAME:${altName}`)
-        ) {
-          await tx.businessIdentifier.create({
-            data: {
-              businessId: targetId,
-              type: IdentifierType.ALTERNATIVE_NAME,
-              value: source.name,
-              normalizedValue: altName,
+          await tx.businessIdentifier.upsert({
+            where: {
+              businessId_type_normalizedValue: {
+                businessId: targetId,
+                type: ident.type,
+                normalizedValue: ident.normalizedValue,
+              },
             },
+            create: {
+              businessId: targetId,
+              type: ident.type,
+              value: ident.value,
+              normalizedValue: ident.normalizedValue,
+              verified: ident.verified,
+            },
+            update: {},
+          });
+        }
+        await tx.businessIdentifier.deleteMany({
+          where: { businessId: sourceId },
+        });
+        const alt = normalizeName(source.name);
+        if (alt && alt !== normalizeName(target.name)) {
+          await tx.businessIdentifier.upsert({
+            where: {
+              businessId_type_normalizedValue: {
+                businessId: targetId,
+                type: IdentifierType.ALT_NAME,
+                normalizedValue: alt,
+              },
+            },
+            create: {
+              businessId: targetId,
+              type: IdentifierType.ALT_NAME,
+              value: source.name,
+              normalizedValue: alt,
+            },
+            update: {},
           });
         }
 
-        await tx.businessLocation.updateMany({
-          where: { businessId: sourceId },
-          data: { businessId: targetId, isPrimary: false },
-        });
-
-        // Reviews: resolve "two current reviews from one person" before moving.
-        const sourceReviews = await tx.review.findMany({
-          where: { businessId: sourceId },
-          select: { id: true, userId: true, activeKey: true, createdAt: true },
+        const sourceActive = await tx.review.findMany({
+          where: { businessId: sourceId, activeKey: { not: null } },
+          select: { id: true, userId: true, createdAt: true },
         });
         const targetActive = await tx.review.findMany({
           where: { businessId: targetId, activeKey: { not: null } },
           select: { id: true, userId: true, createdAt: true },
         });
-        const targetActiveByUser = new Map(
-          targetActive.map((r) => [r.userId, r]),
-        );
+        const targetByUser = new Map(targetActive.map((r) => [r.userId, r]));
         await tx.review.updateMany({
           where: { businessId: sourceId },
           data: { activeKey: null },
         });
-        for (const r of sourceReviews) {
-          if (!r.activeKey) continue;
-          const clash = targetActiveByUser.get(r.userId);
+        for (const r of sourceActive) {
+          const clash = targetByUser.get(r.userId);
           if (!clash) {
             await tx.review.update({
               where: { id: r.id },
@@ -528,7 +565,7 @@ export class BusinessWriterService {
           } else if (r.createdAt > clash.createdAt) {
             await tx.review.update({
               where: { id: clash.id },
-              data: { activeKey: null, supersededAt: new Date() },
+              data: { activeKey: null, deletedAt: new Date() },
             });
             await tx.review.update({
               where: { id: r.id },
@@ -537,11 +574,11 @@ export class BusinessWriterService {
           } else {
             await tx.review.update({
               where: { id: r.id },
-              data: { supersededAt: new Date() },
+              data: { deletedAt: new Date() },
             });
           }
         }
-        await tx.review.updateMany({
+        const moved = await tx.review.updateMany({
           where: { businessId: sourceId },
           data: { businessId: targetId },
         });
@@ -558,12 +595,11 @@ export class BusinessWriterService {
           data: { businessId: targetId },
         });
 
-        // Claims: open claims follow the business; one open claim per person on the target.
-        const openClaims = await tx.businessClaim.findMany({
-          where: { businessId: sourceId, pendingKey: { not: null } },
+        const pending = await tx.businessClaim.findMany({
+          where: { businessId: sourceId, status: ClaimStatus.PENDING },
         });
-        for (const c of openClaims) {
-          const key = `${targetId}:${c.claimantId}`;
+        for (const c of pending) {
+          const key = `${targetId}:${c.userId}`;
           const dup = await tx.businessClaim.findUnique({
             where: { pendingKey: key },
           });
@@ -571,10 +607,11 @@ export class BusinessWriterService {
             where: { id: c.id },
             data: dup
               ? {
-                  status: 'CANCELLED',
+                  status: ClaimStatus.REJECTED,
                   pendingKey: null,
-                  decisionNote:
-                    'Merged into another listing with an open claim',
+                  decisionReason:
+                    'This listing was merged into another listing where you already have a pending claim.',
+                  decidedAt: new Date(),
                 }
               : { businessId: targetId, pendingKey: key },
           });
@@ -584,7 +621,6 @@ export class BusinessWriterService {
           data: { businessId: targetId },
         });
 
-        // Managers of the duplicate keep access unless they already manage the target.
         const members = await tx.businessMember.findMany({
           where: { businessId: sourceId },
         });
@@ -606,20 +642,18 @@ export class BusinessWriterService {
           OwnershipStatus.UNCLAIMED,
           OwnershipStatus.CLAIM_PENDING,
           OwnershipStatus.CLAIMED,
-          OwnershipStatus.VERIFIED,
         ];
-        const ownership =
+        const ownershipStatus =
           rank.indexOf(source.ownershipStatus) >
           rank.indexOf(target.ownershipStatus)
             ? source.ownershipStatus
             : target.ownershipStatus;
-
         await tx.business.update({
           where: { id: targetId },
           data: {
-            ownershipStatus: ownership,
-            underInvestigation:
-              target.underInvestigation || source.underInvestigation,
+            ownershipStatus,
+            ownershipVerified:
+              target.ownershipVerified || source.ownershipVerified,
           },
         });
         await tx.business.update({
@@ -638,10 +672,25 @@ export class BusinessWriterService {
         return {
           source: { id: source.id, slug: source.slug, name: source.name },
           target: { id: target.id, slug: target.slug, name: target.name },
-          movedReviews: sourceReviews.length,
+          movedReviews: moved.count,
+          before: { status: source.status },
         };
       },
       { timeout: 30_000 },
     );
+  }
+
+  /** Sanity check used when admins create listings: duplicates need explicit confirmation. */
+  assertNoUnconfirmedDuplicates(
+    candidates: DuplicateCandidateDto[],
+    confirmed?: boolean,
+  ) {
+    if (candidates.length && !confirmed) {
+      throw new ConflictException({
+        message:
+          'Possible duplicates found. Merge instead, or resend with confirmNotDuplicate: true.',
+        duplicateCandidates: candidates,
+      });
+    }
   }
 }

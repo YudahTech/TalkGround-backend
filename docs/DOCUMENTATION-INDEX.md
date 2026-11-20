@@ -16,7 +16,8 @@
 | Building a feature | [PRD-v1.0.md](./PRD-v1.0.md) + [API-SPECIFICATION.md](./API-SPECIFICATION.md) |
 | **Frontend integration (separate repo)** | [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) + Swagger `http://localhost:3001/docs` |
 | **Frontend auth (HttpOnly cookies)** | [FRONTEND-AUTH.md](./FRONTEND-AUTH.md) |
-| **API v2.0 changelog & design record (PRD rebuild)** | [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md) |
+| **API 2.5 changelog, §19 status & design record (PRD v2.5)** | [API-CHANGELOG-v2.5.md](./API-CHANGELOG-v2.5.md) |
+| API 2.0 changelog (superseded) | [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md) |
 | **Testing all API endpoints** | [API-TESTING-GUIDE.md](./API-TESTING-GUIDE.md) |
 | **Adding/finding Swagger endpoints** | [SWAGGER-GUIDE.md](./SWAGGER-GUIDE.md) |
 | **Deploy API to Render (live Swagger)** | [RENDER-DEPLOYMENT.md](./RENDER-DEPLOYMENT.md) |

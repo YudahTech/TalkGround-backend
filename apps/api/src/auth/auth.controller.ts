@@ -17,6 +17,8 @@ import { OptionalAuth, Public } from '../common/decorators';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthUser } from '../common/current-user.decorator';
 import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
+import { ApiData, ApiErrors, ApiMessage } from '../common/api-response';
+import { AccountResultDto, CodeSentDto, SessionDto } from './auth.responses';
 import {
   clearSessionCookies,
   readCookie,
@@ -48,6 +50,8 @@ export class AuthController {
       'With EMAIL_DEV_MODE=true also returns devEmailCode.',
   })
   @ApiBody({ type: RegisterDto })
+  @ApiData(SessionDto, { status: 201 })
+  @ApiErrors(400, 409, 429)
   @Post('register')
   async register(
     @Body() dto: RegisterDto,
@@ -64,10 +68,11 @@ export class AuthController {
     summary:
       'Login (public). 10 failed attempts lock the account for 15 minutes.',
     description:
-      'Sets the HttpOnly session cookies and returns { data: { user, expiresIn, refreshTokenExpiresAt } }. ' +
-      'Demo: chinedu.okafor@gmail.com / demo1234 — Admin: admin@revyu.ng / admin123',
+      'Sets the HttpOnly session cookies and returns { data: { user, expiresIn, refreshTokenExpiresAt } }.',
   })
   @ApiBody({ type: LoginDto })
+  @ApiData(SessionDto, { status: 201 })
+  @ApiErrors(400, 401, 403, 429)
   @Post('login')
   async login(
     @Body() dto: LoginDto,
@@ -89,6 +94,8 @@ export class AuthController {
       'The old refresh token stops working. Replaying an already-used refresh token signs the user out everywhere. ' +
       'On failure (401) both cookies are cleared.',
   })
+  @ApiData(SessionDto)
+  @ApiErrors(401, 403)
   @Post('refresh')
   async refresh(
     @Req() req: Request,
@@ -113,6 +120,7 @@ export class AuthController {
     description: 'allDevices=true also revokes every other session.',
   })
   @ApiBody({ type: LogoutDto })
+  @ApiMessage()
   @Post('logout')
   async logout(
     @Body() dto: LogoutDto,
@@ -136,6 +144,8 @@ export class AuthController {
       'Email a password reset link (public; same response whether or not the email exists)',
   })
   @ApiBody({ type: ForgotPasswordDto })
+  @ApiMessage({ status: 201 })
+  @ApiErrors(400, 429)
   @Post('forgot-password')
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.auth.forgotPassword(dto).then((data) => ({ data }));
@@ -149,6 +159,8 @@ export class AuthController {
       'Set a new password with the token from the reset link (signs out all sessions)',
   })
   @ApiBody({ type: ResetPasswordDto })
+  @ApiMessage()
+  @ApiErrors(400, 429)
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.auth.resetPassword(dto).then((data) => ({ data }));
@@ -162,6 +174,8 @@ export class AuthController {
       'Change password (JWT). Signs out other sessions and returns a new session.',
   })
   @ApiBody({ type: ChangePasswordDto })
+  @ApiData(SessionDto)
+  @ApiErrors(400, 401, 429)
   @Post('change-password')
   async changePassword(
     @CurrentUser() user: AuthUser,
@@ -180,6 +194,8 @@ export class AuthController {
     summary:
       'Send email verification code (JWT). EMAIL_DEV_MODE=true returns devCode.',
   })
+  @ApiData(CodeSentDto)
+  @ApiErrors(401, 429, 503)
   @Post('verify-email/send-code')
   sendEmailCode(@CurrentUser() user: AuthUser) {
     return this.auth.sendEmailCode(user.id).then((data) => ({ data }));
@@ -190,6 +206,8 @@ export class AuthController {
   @Throttle({ default: { limit: 10, ttl: MINUTE } })
   @ApiOperation({ summary: 'Confirm email verification code (JWT)' })
   @ApiBody({ type: ConfirmOtpDto })
+  @ApiData(AccountResultDto)
+  @ApiErrors(400, 401, 429)
   @Post('verify-email/confirm')
   confirmEmail(@CurrentUser() user: AuthUser, @Body() dto: ConfirmOtpDto) {
     return this.auth.confirmEmailCode(user.id, dto).then((data) => ({ data }));
@@ -204,6 +222,8 @@ export class AuthController {
       'OTP_DEV_MODE=true skips SMS and returns devCode (testing only).',
   })
   @ApiBody({ type: SendPhoneOtpDto, required: false })
+  @ApiData(CodeSentDto, { status: 201 })
+  @ApiErrors(400, 401, 409, 429, 503)
   @Post('verify-phone/send-otp')
   sendOtp(@CurrentUser() user: AuthUser, @Body() dto: SendPhoneOtpDto) {
     return this.auth
@@ -217,6 +237,8 @@ export class AuthController {
     summary: 'Confirm phone OTP (JWT). 5 wrong attempts invalidate the code.',
   })
   @ApiBody({ type: ConfirmOtpDto })
+  @ApiData(AccountResultDto, { status: 201 })
+  @ApiErrors(400, 401, 429)
   @Post('verify-phone/confirm-otp')
   confirmOtp(@CurrentUser() user: AuthUser, @Body() dto: ConfirmOtpDto) {
     return this.auth.confirmPhoneOtp(user.id, dto).then((data) => ({ data }));

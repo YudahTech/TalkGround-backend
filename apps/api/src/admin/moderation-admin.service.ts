@@ -5,7 +5,6 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  AdminPermission,
   DisputeStatus,
   EvidenceStatus,
   ModerationActionType,
@@ -21,46 +20,69 @@ import { ModerationService } from '../moderation/moderation.service';
 import { RatingsService } from '../businesses/ratings.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { RevalidationService } from '../revalidation/revalidation.service';
+import { refreshUnderInvestigation } from '../reviews/investigation';
+import { PERMISSIONS } from '../common/permissions';
 import { pageMeta, skipTake } from '../common/pagination';
-import { excerpt } from '../common/utils';
+import { cleanText, excerpt } from '../common/utils';
 import type { AuthUser } from '../common/current-user.decorator';
 import type {
   DecideDisputeDto,
   DecideReportDto,
-  EvidenceDecisionDto,
+  EditReviewContentDto,
+  EvidenceStatusDto,
   ModerateReviewDto,
   RemoveResponseDto,
+  ReviewAction,
   ReviewQueueQueryDto,
 } from './admin.dto';
+import type {
+  AdminDisputeDetailDto,
+  AdminDisputeDto,
+  AdminReportDto,
+  AdminReviewDetailDto,
+  ModerationResultDto,
+  QueueItemDto,
+} from './admin.responses';
 
-type ReviewAction = ModerateReviewDto['action'];
+type Db = Prisma.TransactionClient | PrismaService;
 
-/** Allowed status transitions for staff review decisions. */
+/** Allowed review status changes (PRD §7.6 statuses). */
 const TRANSITIONS: Record<
   ReviewAction,
   { from: ReviewStatus[]; to: ReviewStatus; type: ModerationActionType }
 > = {
   publish: {
-    from: [ReviewStatus.PENDING_MODERATION],
+    from: [ReviewStatus.PENDING],
     to: ReviewStatus.PUBLISHED,
     type: ModerationActionType.PUBLISH,
   },
-  remove: {
+  suspend: {
     from: [
-      ReviewStatus.PENDING_MODERATION,
+      ReviewStatus.PENDING,
       ReviewStatus.PUBLISHED,
       ReviewStatus.UNDER_INVESTIGATION,
+    ],
+    to: ReviewStatus.SUSPENDED,
+    type: ModerationActionType.SUSPEND,
+  },
+  remove: {
+    from: [
+      ReviewStatus.PENDING,
+      ReviewStatus.PUBLISHED,
+      ReviewStatus.UNDER_INVESTIGATION,
+      ReviewStatus.SUSPENDED,
     ],
     to: ReviewStatus.REMOVED,
     type: ModerationActionType.REMOVE,
   },
   restore: {
-    from: [ReviewStatus.REMOVED],
+    from: [ReviewStatus.SUSPENDED, ReviewStatus.REMOVED],
     to: ReviewStatus.PUBLISHED,
     type: ModerationActionType.RESTORE,
   },
   investigate: {
-    from: [ReviewStatus.PUBLISHED, ReviewStatus.PENDING_MODERATION],
+    from: [ReviewStatus.PENDING, ReviewStatus.PUBLISHED],
     to: ReviewStatus.UNDER_INVESTIGATION,
     type: ModerationActionType.MARK_UNDER_INVESTIGATION,
   },
@@ -70,27 +92,16 @@ const TRANSITIONS: Record<
     type: ModerationActionType.CLEAR_INVESTIGATION,
   },
 };
-
-const REASON_TEXT: Record<PolicyReason, string> = {
-  SPAM: 'spam',
-  FABRICATED_REVIEW: 'it appears to describe an experience that did not happen',
-  HARASSMENT: 'harassment',
-  THREATS: 'threats',
-  HATE_SPEECH: 'hate speech',
-  IMPERSONATION: 'impersonation',
-  PERSONAL_INFORMATION: 'it exposed personal information',
-  MANIPULATED_RATINGS: 'rating manipulation',
-  FAKE_EVIDENCE: 'the supporting evidence was not genuine',
-  CONFLICT_OF_INTEREST: 'a conflict of interest',
-  DEFAMATORY_OR_UNLAWFUL: 'potentially unlawful or defamatory content',
-  NO_VIOLATION: 'no rule was broken',
-  OTHER: 'a breach of our content rules',
-};
+const TAKEDOWN: ReviewAction[] = ['suspend', 'remove'];
+const ACTIVE_DISPUTE: DisputeStatus[] = [
+  DisputeStatus.OPEN,
+  DisputeStatus.UNDER_REVIEW,
+];
 
 /**
- * PRD §8.2–§8.4. Every decision cites a policy ground and is stored as a ModerationAction plus
- * an audit entry. Negative reviews are never removed just because a business disagrees: removal
- * needs a policy reason other than NO_VIOLATION.
+ * PRD v2.5 §8.2–§8.4. Every decision has a recorded reason (ModerationAction + audit log with
+ * before/after). A review is never removed just because a business disagrees: a take-down needs a
+ * policy reason other than NO_VIOLATION. The same standard applies to positive and negative reviews.
  */
 @Injectable()
 export class ModerationAdminService {
@@ -100,22 +111,38 @@ export class ModerationAdminService {
     private ratings: RatingsService,
     private notify: NotificationsService,
     private uploads: UploadsService,
+    private revalidate: RevalidationService,
   ) {}
 
   // ──────────────────────────────────────────────────────────────── queues
 
-  async queue(q: ReviewQueueQueryDto) {
-    const queue = q.queue ?? 'pending_moderation';
+  async queue(
+    q: ReviewQueueQueryDto,
+  ): Promise<{ data: QueueItemDto[]; meta: ReturnType<typeof pageMeta> }> {
+    const queue = q.queue ?? 'pending';
+    const base: Prisma.ReviewWhereInput = { deletedAt: null };
     const where: Prisma.ReviewWhereInput =
-      queue === 'pending_moderation'
-        ? { status: ReviewStatus.PENDING_MODERATION }
+      queue === 'pending'
+        ? { ...base, status: ReviewStatus.PENDING }
         : queue === 'under_investigation'
-          ? { status: ReviewStatus.UNDER_INVESTIGATION }
-          : queue === 'removed'
-            ? { status: ReviewStatus.REMOVED }
-            : queue === 'reported'
-              ? { reports: { some: { status: ReportStatus.OPEN } } }
-              : { evidence: { some: { status: EvidenceStatus.NOT_REVIEWED } } };
+          ? {
+              ...base,
+              OR: [
+                { underInvestigation: true },
+                { status: ReviewStatus.UNDER_INVESTIGATION },
+              ],
+            }
+          : queue === 'reported'
+            ? { reports: { some: { status: ReportStatus.OPEN } } }
+            : queue === 'evidence'
+              ? {
+                  ...base,
+                  evidenceAttached: true,
+                  evidenceStatus: EvidenceStatus.NOT_REVIEWED,
+                }
+              : queue === 'suspended'
+                ? { status: ReviewStatus.SUSPENDED }
+                : { status: ReviewStatus.REMOVED };
     const [total, rows] = await Promise.all([
       this.prisma.review.count({ where }),
       this.prisma.review.findMany({
@@ -136,8 +163,7 @@ export class ModerationAdminService {
           _count: {
             select: {
               reports: { where: { status: ReportStatus.OPEN } },
-              evidence: { where: { status: EvidenceStatus.NOT_REVIEWED } },
-              disputes: { where: { status: DisputeStatus.OPEN } },
+              disputes: { where: { status: { in: ACTIVE_DISPUTE } } },
             },
           },
         },
@@ -153,17 +179,23 @@ export class ModerationAdminService {
         business: r.business,
         author: r.user,
         flags: r.flags.map((f) => ({ ...f, type: f.type.toLowerCase() })),
+        underInvestigation:
+          r.underInvestigation || r.status === ReviewStatus.UNDER_INVESTIGATION,
+        evidenceAttached: r.evidenceAttached,
+        evidenceStatus: r.evidenceStatus.toLowerCase(),
         openReports: r._count.reports,
-        evidenceToReview: r._count.evidence,
-        openDisputes: r._count.disputes,
+        activeDisputes: r._count.disputes,
         createdAt: r.createdAt,
       })),
       meta: pageMeta(q.page, q.limit, total),
     };
   }
 
-  /** Everything a moderator needs to decide. Private evidence links require EVIDENCE_REVIEW. */
-  async reviewDetail(actor: AuthUser, id: string) {
+  /** Everything needed to decide, incl. full edit history. Receipt links need evidence.review. */
+  async reviewDetail(
+    actor: AuthUser,
+    id: string,
+  ): Promise<{ data: AdminReviewDetailDto }> {
     const r = await this.prisma.review.findUnique({
       where: { id },
       include: {
@@ -179,10 +211,10 @@ export class ModerationAdminService {
             suspended: true,
           },
         },
-        dimensions: {
-          include: { dimension: { select: { key: true, name: true } } },
+        dimensionRatings: {
+          include: { dimension: { select: { key: true, label: true } } },
         },
-        evidence: true,
+        evidence: { orderBy: { createdAt: 'asc' } },
         revisions: { orderBy: { createdAt: 'desc' } },
         flags: true,
         reports: {
@@ -192,7 +224,7 @@ export class ModerationAdminService {
         disputes: { orderBy: { createdAt: 'desc' } },
         response: {
           include: {
-            revisions: true,
+            revisions: { orderBy: { createdAt: 'desc' } },
             author: { select: { username: true, displayName: true } },
           },
         },
@@ -200,72 +232,167 @@ export class ModerationAdminService {
       },
     });
     if (!r) throw new NotFoundException('Review not found');
-    const canSeeEvidence = actor.permissions.includes(
-      AdminPermission.EVIDENCE_REVIEW,
+    const canSeeReceipts = actor.permissions.includes(
+      PERMISSIONS.EVIDENCE_REVIEW,
     );
-    const [history, otherReviewsByAuthor] = await Promise.all([
+    const [history, other] = await Promise.all([
       this.moderation.history(ModerationTarget.REVIEW, id),
       this.prisma.review.count({
         where: { userId: r.userId, id: { not: id } },
       }),
     ]);
+    const {
+      evidence,
+      revisions,
+      flags,
+      reports,
+      disputes,
+      response,
+      ipHash: _i,
+      textHash: _t,
+      activeKey: _a,
+      ...review
+    } = r;
     return {
       data: {
-        ...r,
-        status: r.status.toLowerCase(),
-        ipHash: undefined,
-        textHash: undefined,
-        activeKey: undefined,
-        evidence: r.evidence.map((e) => ({
+        review: {
+          ...review,
+          status: r.status.toLowerCase(),
+          evidenceStatus: r.evidenceStatus.toLowerCase(),
+        },
+        evidence: evidence.map((e) => ({
           id: e.id,
-          kind: e.kind.toLowerCase(),
+          type: e.type.toLowerCase(),
           isPrivate: e.isPrivate,
-          status: e.status.toLowerCase(),
-          reviewNote: e.reviewNote,
-          createdAt: e.createdAt,
           viewUrl: !e.isPrivate
             ? e.url
-            : canSeeEvidence
+            : canSeeReceipts
               ? this.uploads.privateViewUrl(e.url)
               : null,
-          restricted: e.isPrivate && !canSeeEvidence,
+          restricted: e.isPrivate && !canSeeReceipts,
+          createdAt: e.createdAt,
         })),
-        authorOtherReviews: otherReviewsByAuthor,
+        revisions: revisions,
+        flags: flags.map((f) => ({ ...f, type: f.type.toLowerCase() })),
+        reports: reports.map((x) => ({
+          ...x,
+          openKey: undefined,
+          reasonCode: x.reasonCode.toLowerCase(),
+          status: x.status.toLowerCase(),
+        })),
+        disputes: disputes.map((d) => ({
+          ...d,
+          openKey: undefined,
+          status: d.status.toLowerCase(),
+        })),
+        response: response,
         moderationHistory: history,
+        authorOtherReviews: other,
       },
     };
+  }
+
+  private async applyReviewAction(
+    db: Db,
+    actor: AuthUser,
+    reviewId: string,
+    action: ReviewAction,
+    reason: PolicyReason,
+    note: string | undefined,
+    links: { reportId?: string; disputeId?: string } = {},
+  ) {
+    const review = await db.review.findUnique({ where: { id: reviewId } });
+    if (!review) throw new NotFoundException('Review not found');
+    const t = TRANSITIONS[action];
+    if (!t.from.includes(review.status)) {
+      throw new BadRequestException(
+        `Cannot ${action.replace('_', ' ')} a review that is ${review.status.toLowerCase()}`,
+      );
+    }
+    if (TAKEDOWN.includes(action) && reason === PolicyReason.NO_VIOLATION) {
+      throw new BadRequestException(
+        'Suspending or removing a review requires the policy it breaks (PRD §8.2)',
+      );
+    }
+    await db.review.update({
+      where: { id: reviewId },
+      data: {
+        status: t.to,
+        ...(t.to === ReviewStatus.PUBLISHED && !review.publishedAt
+          ? { publishedAt: new Date() }
+          : {}),
+      },
+    });
+    await this.moderation.record(
+      actor,
+      {
+        targetType: ModerationTarget.REVIEW,
+        targetId: reviewId,
+        action: t.type,
+        reason,
+        note,
+        reportId: links.reportId,
+        disputeId: links.disputeId,
+        before: { status: review.status },
+        after: { status: t.to },
+        metadata: { businessId: review.businessId },
+      },
+      db,
+    );
+    await this.ratings.recompute(review.businessId, db);
+    return { review, to: t.to };
   }
 
   async moderateReview(
     actor: AuthUser,
     id: string,
     dto: ModerateReviewDto,
-    links: { reportId?: string; disputeId?: string } = {},
+  ): Promise<{ data: ModerationResultDto }> {
+    const { review, to } = await this.prisma.$transaction((tx) =>
+      this.applyReviewAction(tx, actor, id, dto.action, dto.reason, dto.note),
+    );
+    void this.revalidate.business(review.businessId);
+    return { data: { id, status: to.toLowerCase() } };
+  }
+
+  /** Redact content (e.g. personal information). The previous version is kept as a revision. */
+  async editReviewContent(
+    actor: AuthUser,
+    id: string,
+    dto: EditReviewContentDto,
+    db?: Db,
+    links: { disputeId?: string } = {},
   ) {
-    const review = await this.prisma.review.findUnique({
-      where: { id },
-      include: { business: { select: { name: true, slug: true } } },
-    });
-    if (!review) throw new NotFoundException('Review not found');
-    const t = TRANSITIONS[dto.action];
-    if (!t.from.includes(review.status)) {
-      throw new BadRequestException(
-        `Cannot ${dto.action} a review that is ${review.status.toLowerCase()}`,
-      );
-    }
-    if (dto.action === 'remove' && dto.reason === PolicyReason.NO_VIOLATION) {
-      throw new BadRequestException(
-        'Removing a review requires the policy it breaks (PRD §8.2)',
-      );
-    }
-    await this.prisma.$transaction(async (tx) => {
-      await tx.review.update({
+    if (dto.title === undefined && dto.body === undefined)
+      throw new BadRequestException('Send title and/or body');
+    const run = async (tx: Db) => {
+      const r = await tx.review.findUnique({
+        where: { id },
+        include: { dimensionRatings: { include: { dimension: true } } },
+      });
+      if (!r) throw new NotFoundException('Review not found');
+      await tx.reviewRevision.create({
+        data: {
+          reviewId: id,
+          snapshot: {
+            overallRating: r.overallRating,
+            title: r.title,
+            body: r.body,
+            recommend: r.recommend,
+            dimensions: r.dimensionRatings.map((d) => ({
+              key: d.dimension.key,
+              value: d.value,
+            })),
+            editedBy: 'staff',
+          },
+        },
+      });
+      const after = await tx.review.update({
         where: { id },
         data: {
-          status: t.to,
-          ...(t.to === ReviewStatus.PUBLISHED && !review.publishedAt
-            ? { publishedAt: new Date() }
-            : {}),
+          ...(dto.title !== undefined ? { title: cleanText(dto.title) } : {}),
+          ...(dto.body !== undefined ? { body: cleanText(dto.body) } : {}),
+          editedAt: new Date(),
         },
       });
       await this.moderation.record(
@@ -273,73 +400,50 @@ export class ModerationAdminService {
         {
           targetType: ModerationTarget.REVIEW,
           targetId: id,
-          action: t.type,
+          action: ModerationActionType.EDIT,
           reason: dto.reason,
           note: dto.note,
-          reportId: links.reportId,
           disputeId: links.disputeId,
-          metadata: {
-            from: review.status,
-            to: t.to,
-            businessId: review.businessId,
-          },
+          before: { title: r.title, body: r.body },
+          after: { title: after.title, body: after.body },
         },
         tx,
       );
-      await this.ratings.recompute(review.businessId, tx);
-    });
-
-    if (dto.action === 'remove') {
-      await this.notify.toUser(review.userId, 'Your review was removed', [
-        `Your review of ${review.business.name} was removed because ${REASON_TEXT[dto.reason]}.`,
-        ...(dto.note ? [`Moderator note: ${dto.note}`] : []),
-        'If you think this is a mistake, reply to this email to appeal.',
-      ]);
-    } else if (dto.action === 'publish') {
-      await this.notify.toUser(
-        review.userId,
-        'Your review is live',
-        [
-          `Your review of ${review.business.name} passed our checks and is now published.`,
-        ],
-        {
-          label: 'View your review',
-          path: `/reviews/${id}`,
-        },
-      );
-    }
-    return { data: { reviewId: id, status: t.to.toLowerCase() } };
+      return r.businessId;
+    };
+    const businessId = db ? await run(db) : await this.prisma.$transaction(run);
+    void this.revalidate.business(businessId);
+    return { data: { id, status: 'edited' } };
   }
 
-  /** PRD §7.6: "Evidence reviewed" only after this actual examination. */
-  async decideEvidence(
+  /** PRD §6.4: evidenceStatus changes only by a moderator action, and every change is audit-logged. */
+  async setEvidenceStatus(
     actor: AuthUser,
-    evidenceId: string,
-    dto: EvidenceDecisionDto,
-  ) {
-    const ev = await this.prisma.reviewEvidence.findUnique({
-      where: { id: evidenceId },
-    });
-    if (!ev) throw new NotFoundException('Evidence not found');
+    reviewId: string,
+    dto: EvidenceStatusDto,
+  ): Promise<{ data: ModerationResultDto }> {
+    const r = await this.prisma.review.findUnique({ where: { id: reviewId } });
+    if (!r) throw new NotFoundException('Review not found');
+    if (!r.evidenceAttached)
+      throw new BadRequestException('This review has no evidence attached');
     const status =
-      dto.decision === 'accepted'
+      dto.status === 'accepted'
         ? EvidenceStatus.ACCEPTED
         : EvidenceStatus.REJECTED;
     await this.prisma.$transaction(async (tx) => {
-      await tx.reviewEvidence.update({
-        where: { id: evidenceId },
-        data: {
-          status,
-          reviewedById: actor.id,
-          reviewedAt: new Date(),
-          reviewNote: dto.note ?? null,
-        },
+      await tx.review.update({
+        where: { id: reviewId },
+        data: { evidenceStatus: status },
+      });
+      await tx.reviewEvidence.updateMany({
+        where: { reviewId },
+        data: { reviewedById: actor.id, reviewedAt: new Date() },
       });
       await this.moderation.record(
         actor,
         {
-          targetType: ModerationTarget.EVIDENCE,
-          targetId: evidenceId,
+          targetType: ModerationTarget.REVIEW,
+          targetId: reviewId,
           action:
             status === EvidenceStatus.ACCEPTED
               ? ModerationActionType.ACCEPT_EVIDENCE
@@ -348,65 +452,80 @@ export class ModerationAdminService {
             status === EvidenceStatus.ACCEPTED
               ? PolicyReason.NO_VIOLATION
               : PolicyReason.FAKE_EVIDENCE,
-          note: dto.note,
-          metadata: { reviewId: ev.reviewId },
+          note: dto.reason,
+          before: { evidenceStatus: r.evidenceStatus },
+          after: { evidenceStatus: status },
         },
         tx,
       );
     });
-    return { data: { evidenceId, status: status.toLowerCase() } };
+    void this.revalidate.business(r.businessId);
+    return { data: { id: reviewId, status: status.toLowerCase() } };
+  }
+
+  private async removeResponseTx(
+    tx: Db,
+    actor: AuthUser,
+    responseId: string,
+    reason: PolicyReason,
+    note?: string,
+    reportId?: string,
+  ) {
+    const resp = await tx.businessResponse.findUnique({
+      where: { id: responseId },
+    });
+    if (!resp) throw new NotFoundException('Response not found');
+    if (resp.status === ResponseStatus.REMOVED)
+      throw new ConflictException('Already removed');
+    if (reason === PolicyReason.NO_VIOLATION)
+      throw new BadRequestException(
+        'Removing a response requires the policy it breaks',
+      );
+    await tx.businessResponse.update({
+      where: { id: responseId },
+      data: { status: ResponseStatus.REMOVED },
+    });
+    await this.moderation.record(
+      actor,
+      {
+        targetType: ModerationTarget.BUSINESS_RESPONSE,
+        targetId: resp.reviewId,
+        action: ModerationActionType.REMOVE,
+        reason,
+        note,
+        reportId,
+        before: { responseStatus: ResponseStatus.PUBLISHED },
+        after: { responseStatus: ResponseStatus.REMOVED },
+        metadata: { responseId, businessId: resp.businessId },
+      },
+      tx,
+    );
+    return resp;
   }
 
   async removeResponse(
     actor: AuthUser,
     responseId: string,
     dto: RemoveResponseDto,
-  ) {
-    const resp = await this.prisma.businessResponse.findUnique({
-      where: { id: responseId },
-    });
-    if (!resp) throw new NotFoundException('Response not found');
-    if (resp.status === ResponseStatus.REMOVED)
-      throw new ConflictException('Already removed');
-    if (dto.reason === PolicyReason.NO_VIOLATION) {
-      throw new BadRequestException(
-        'Removing a response requires the policy it breaks',
-      );
-    }
-    await this.prisma.$transaction(async (tx) => {
-      await tx.businessResponse.update({
-        where: { id: responseId },
-        data: { status: ResponseStatus.REMOVED },
-      });
-      await this.moderation.record(
-        actor,
-        {
-          targetType: ModerationTarget.BUSINESS_RESPONSE,
-          targetId: responseId,
-          action: ModerationActionType.REMOVE,
-          reason: dto.reason,
-          note: dto.note,
-          metadata: { reviewId: resp.reviewId, businessId: resp.businessId },
-        },
-        tx,
-      );
-    });
-    await this.notify.toBusiness(
-      resp.businessId,
-      'Your response to a review was removed',
-      [
-        `A response posted by your business was removed because ${REASON_TEXT[dto.reason]}.`,
-        ...(dto.note ? [`Moderator note: ${dto.note}`] : []),
-      ],
+  ): Promise<{ data: ModerationResultDto }> {
+    const resp = await this.prisma.$transaction((tx) =>
+      this.removeResponseTx(tx, actor, responseId, dto.reason, dto.note),
     );
-    return { data: { responseId, status: 'removed' } };
+    void this.revalidate.business(resp.businessId);
+    return { data: { id: responseId, status: 'removed' } };
   }
 
   // ─────────────────────────────────────────────────────────────── reports
 
-  async reports(status: string | undefined, page: number, limit: number) {
+  async reports(
+    status: string | undefined,
+    page: number,
+    limit: number,
+  ): Promise<{ data: AdminReportDto[]; meta: ReturnType<typeof pageMeta> }> {
     const where: Prisma.ReviewReportWhereInput = {
-      status: (status?.toUpperCase() as ReportStatus) ?? ReportStatus.OPEN,
+      status: status
+        ? (status.toUpperCase() as ReportStatus)
+        : ReportStatus.OPEN,
     };
     const [total, rows] = await Promise.all([
       this.prisma.reviewReport.count({ where }),
@@ -430,33 +549,50 @@ export class ModerationAdminService {
     ]);
     return {
       data: rows.map((r) => ({
-        ...r,
-        reason: r.reason.toLowerCase(),
+        id: r.id,
+        target: r.responseId ? 'response' : 'review',
+        reviewId: r.reviewId,
+        responseId: r.responseId,
+        reasonCode: r.reasonCode.toLowerCase(),
+        note: r.note,
         status: r.status.toLowerCase(),
         reporterType: r.reporterType.toLowerCase(),
-        openKey: undefined,
+        reporter: r.reporter,
+        review: { ...r.review, status: r.review.status.toLowerCase() },
+        createdAt: r.createdAt,
       })),
       meta: pageMeta(page, limit, total),
     };
   }
 
-  async decideReport(actor: AuthUser, id: string, dto: DecideReportDto) {
+  /** Decide a report. Acting on the target closes every open report about the same target. */
+  async decideReport(
+    actor: AuthUser,
+    id: string,
+    dto: DecideReportDto,
+  ): Promise<{ data: ModerationResultDto }> {
     const report = await this.prisma.reviewReport.findUnique({ where: { id } });
     if (!report) throw new NotFoundException('Report not found');
     if (report.status !== ReportStatus.OPEN)
       throw new ConflictException('This report was already decided');
-
-    if (dto.decision === 'dismiss') {
-      await this.prisma.$transaction(async (tx) => {
+    const businessId = (
+      await this.prisma.review.findUniqueOrThrow({
+        where: { id: report.reviewId },
+        select: { businessId: true },
+      })
+    ).businessId;
+    let closed = 0;
+    await this.prisma.$transaction(async (tx) => {
+      const closeData = {
+        openKey: null,
+        resolvedById: actor.id,
+        resolvedAt: new Date(),
+        resolutionNote: dto.note ?? null,
+      };
+      if (dto.decision === 'dismiss') {
         await tx.reviewReport.update({
           where: { id },
-          data: {
-            status: ReportStatus.DISMISSED,
-            openKey: null,
-            resolvedById: actor.id,
-            resolvedAt: new Date(),
-            resolutionNote: dto.note ?? null,
-          },
+          data: { ...closeData, status: ReportStatus.DISMISSED },
         });
         await this.moderation.record(
           actor,
@@ -467,146 +603,229 @@ export class ModerationAdminService {
             reason: dto.reason,
             note: dto.note,
             reportId: id,
+            before: { reportStatus: 'OPEN' },
+            after: { reportStatus: 'DISMISSED' },
           },
           tx,
         );
-      });
-      return { data: { reportId: id, status: 'dismissed' } };
-    }
-
-    await this.moderateReview(
-      actor,
-      report.reviewId,
-      {
-        action: dto.decision === 'remove_review' ? 'remove' : 'investigate',
-        reason: dto.reason,
-        note: dto.note,
-      },
-      { reportId: id },
-    );
-    // Acting on the review settles every open report against it.
-    const closed = await this.prisma.reviewReport.updateMany({
-      where: { reviewId: report.reviewId, status: ReportStatus.OPEN },
-      data: {
-        status: ReportStatus.ACTIONED,
-        openKey: null,
-        resolvedById: actor.id,
-        resolvedAt: new Date(),
-        resolutionNote: dto.note ?? null,
-      },
+        closed = 1;
+      } else if (report.responseId) {
+        if (dto.decision !== 'remove')
+          throw new BadRequestException(
+            'A reported response can only be dismissed or removed',
+          );
+        await this.removeResponseTx(
+          tx,
+          actor,
+          report.responseId,
+          dto.reason,
+          dto.note,
+          id,
+        );
+        closed = (
+          await tx.reviewReport.updateMany({
+            where: { responseId: report.responseId, status: ReportStatus.OPEN },
+            data: { ...closeData, status: ReportStatus.ACTIONED },
+          })
+        ).count;
+      } else {
+        await this.applyReviewAction(
+          tx,
+          actor,
+          report.reviewId,
+          dto.decision,
+          dto.reason,
+          dto.note,
+          { reportId: id },
+        );
+        closed = (
+          await tx.reviewReport.updateMany({
+            where: {
+              reviewId: report.reviewId,
+              responseId: null,
+              status: ReportStatus.OPEN,
+            },
+            data: { ...closeData, status: ReportStatus.ACTIONED },
+          })
+        ).count;
+      }
+      await refreshUnderInvestigation(tx, report.reviewId);
     });
+    void this.revalidate.business(businessId);
     return {
-      data: { reportId: id, status: 'actioned', reportsClosed: closed.count },
+      data: {
+        id,
+        status: dto.decision === 'dismiss' ? 'dismissed' : 'actioned',
+        reportsClosed: closed,
+      },
     };
   }
 
   // ────────────────────────────────────────────────────────────── disputes
 
-  async disputes(status: string | undefined, page: number, limit: number) {
-    const where: Prisma.BusinessDisputeWhereInput = {
-      status: (status?.toUpperCase() as DisputeStatus) ?? DisputeStatus.OPEN,
+  private presentDispute(
+    d: Prisma.BusinessDisputeGetPayload<{
+      include: {
+        business: { select: { id: true; slug: true; name: true } };
+        review: {
+          select: { id: true; title: true; overallRating: true; status: true };
+        };
+        openedBy: { select: { username: true; displayName: true } };
+      };
+    }>,
+  ): AdminDisputeDto {
+    return {
+      id: d.id,
+      status: d.status.toLowerCase(),
+      reason: d.reason,
+      decision: d.decision,
+      business: d.business,
+      review: { ...d.review, status: d.review.status.toLowerCase() },
+      openedBy: d.openedBy,
+      createdAt: d.createdAt,
+      decidedAt: d.decidedAt,
     };
+  }
+
+  private disputeInclude = {
+    business: { select: { id: true, slug: true, name: true } },
+    review: {
+      select: { id: true, title: true, overallRating: true, status: true },
+    },
+    openedBy: { select: { username: true, displayName: true } },
+  } as const;
+
+  async disputes(
+    status: string | undefined,
+    page: number,
+    limit: number,
+  ): Promise<{ data: AdminDisputeDto[]; meta: ReturnType<typeof pageMeta> }> {
+    const where: Prisma.BusinessDisputeWhereInput =
+      !status || status === 'active'
+        ? { status: { in: ACTIVE_DISPUTE } }
+        : { status: status.toUpperCase() as DisputeStatus };
     const [total, rows] = await Promise.all([
       this.prisma.businessDispute.count({ where }),
       this.prisma.businessDispute.findMany({
         where,
         orderBy: { createdAt: 'asc' },
         ...skipTake(page, limit),
-        include: {
-          business: { select: { id: true, slug: true, name: true } },
-          review: {
-            select: {
-              id: true,
-              title: true,
-              overallRating: true,
-              status: true,
-            },
-          },
-          raisedBy: { select: { username: true, displayName: true } },
-        },
+        include: this.disputeInclude,
       }),
     ]);
     return {
-      data: rows.map((d) => ({
-        ...d,
-        reason: d.reason.toLowerCase(),
-        status: d.status.toLowerCase(),
-        openKey: undefined,
-      })),
+      data: rows.map((d) => this.presentDispute(d)),
       meta: pageMeta(page, limit, total),
     };
   }
 
-  async disputeDetail(actor: AuthUser, id: string) {
+  async disputeDetail(
+    actor: AuthUser,
+    id: string,
+  ): Promise<{ data: AdminDisputeDetailDto }> {
     const d = await this.prisma.businessDispute.findUnique({
       where: { id },
-      include: {
-        business: {
-          select: { id: true, slug: true, name: true, ownershipStatus: true },
-        },
-        raisedBy: {
-          select: { id: true, username: true, displayName: true, email: true },
-        },
-      },
+      include: this.disputeInclude,
     });
     if (!d) throw new NotFoundException('Dispute not found');
-    const review = await this.reviewDetail(actor, d.reviewId);
-    return {
-      data: {
-        ...d,
-        reason: d.reason.toLowerCase(),
-        status: d.status.toLowerCase(),
-        openKey: undefined,
-        review: review.data,
-        history: await this.moderation.history(
-          ModerationTarget.REVIEW,
-          d.reviewId,
-        ),
-      },
-    };
+    const detail = await this.reviewDetail(actor, d.reviewId);
+    return { data: { ...this.presentDispute(d), reviewDetail: detail.data } };
+  }
+
+  /** OPEN → UNDER_REVIEW when a staff member picks it up (acknowledged in the workflow, §8.6). */
+  async startDisputeReview(
+    actor: AuthUser,
+    id: string,
+  ): Promise<{ data: ModerationResultDto }> {
+    const d = await this.prisma.businessDispute.findUnique({ where: { id } });
+    if (!d) throw new NotFoundException('Dispute not found');
+    if (d.status !== DisputeStatus.OPEN)
+      throw new ConflictException(
+        'Only an open dispute can be taken under review',
+      );
+    await this.prisma.$transaction(async (tx) => {
+      await tx.businessDispute.update({
+        where: { id },
+        data: { status: DisputeStatus.UNDER_REVIEW },
+      });
+      await this.moderation.record(
+        actor,
+        {
+          targetType: ModerationTarget.REVIEW,
+          targetId: d.reviewId,
+          action: ModerationActionType.START_DISPUTE_REVIEW,
+          disputeId: id,
+          before: { disputeStatus: 'OPEN' },
+          after: { disputeStatus: 'UNDER_REVIEW' },
+        },
+        tx,
+      );
+    });
+    return { data: { id, status: 'under_review' } };
   }
 
   /**
-   * PRD §8.4: examine, record the decision, notify both parties, keep the audit trail.
-   * The review itself is only changed through the normal moderation transitions.
+   * PRD §8.4: record the decision, notify both parties, keep the audit trail. UPHELD = the review
+   * stays; REVIEW_ACTIONED = a moderator edited, suspended or removed it; CLOSED = no decision on
+   * the review. A defamation allegation alone is never an automatic takedown (§8.2).
    */
-  async decideDispute(actor: AuthUser, id: string, dto: DecideDisputeDto) {
+  async decideDispute(
+    actor: AuthUser,
+    id: string,
+    dto: DecideDisputeDto,
+  ): Promise<{ data: ModerationResultDto }> {
     const d = await this.prisma.businessDispute.findUnique({
       where: { id },
       include: {
-        business: { select: { name: true } },
+        business: { select: { name: true, slug: true } },
         review: { select: { userId: true } },
       },
     });
     if (!d) throw new NotFoundException('Dispute not found');
-    if (d.status !== DisputeStatus.OPEN)
+    if (!ACTIVE_DISPUTE.includes(d.status))
       throw new ConflictException('This dispute was already decided');
-    if (dto.decision === 'uphold' && !dto.reviewAction) {
+    if (dto.decision === 'review_actioned' && !dto.reviewAction)
       throw new BadRequestException(
-        'reviewAction is required when upholding a dispute',
+        'reviewAction is required for review_actioned',
       );
-    }
-    if (dto.decision === 'uphold') {
-      await this.moderateReview(
-        actor,
-        d.reviewId,
-        {
-          action: dto.reviewAction === 'remove' ? 'remove' : 'investigate',
-          reason: dto.reason,
-          note: dto.note,
-        },
-        { disputeId: id },
+    if (dto.reviewAction === 'edit' && !dto.editedBody)
+      throw new BadRequestException(
+        'editedBody is required for reviewAction edit',
       );
-    }
     const status =
-      dto.decision === 'uphold' ? DisputeStatus.UPHELD : DisputeStatus.REJECTED;
+      dto.decision === 'upheld'
+        ? DisputeStatus.UPHELD
+        : dto.decision === 'review_actioned'
+          ? DisputeStatus.REVIEW_ACTIONED
+          : DisputeStatus.CLOSED;
     await this.prisma.$transaction(async (tx) => {
+      if (dto.decision === 'review_actioned') {
+        if (dto.reviewAction === 'edit') {
+          await this.editReviewContent(
+            actor,
+            d.reviewId,
+            { body: dto.editedBody, reason: dto.reason, note: dto.note },
+            tx,
+            { disputeId: id },
+          );
+        } else {
+          await this.applyReviewAction(
+            tx,
+            actor,
+            d.reviewId,
+            dto.reviewAction!,
+            dto.reason,
+            dto.note,
+            { disputeId: id },
+          );
+        }
+      }
       await tx.businessDispute.update({
         where: { id },
         data: {
           status,
           openKey: null,
-          decisionNote: dto.note,
+          decision: dto.note,
           decidedById: actor.id,
           decidedAt: new Date(),
         },
@@ -617,38 +836,53 @@ export class ModerationAdminService {
           targetType: ModerationTarget.REVIEW,
           targetId: d.reviewId,
           action:
-            dto.decision === 'uphold'
-              ? ModerationActionType.UPHOLD_DISPUTE
-              : ModerationActionType.REJECT_DISPUTE,
+            status === DisputeStatus.UPHELD
+              ? ModerationActionType.UPHOLD_REVIEW
+              : status === DisputeStatus.REVIEW_ACTIONED
+                ? ModerationActionType.ACTION_REVIEW
+                : ModerationActionType.CLOSE_DISPUTE,
           reason: dto.reason,
           note: dto.note,
           disputeId: id,
+          before: { disputeStatus: d.status },
+          after: {
+            disputeStatus: status,
+            reviewAction: dto.reviewAction ?? null,
+          },
         },
         tx,
       );
+      await refreshUnderInvestigation(tx, d.reviewId);
     });
+    void this.revalidate.business(d.businessId);
 
+    const outcome =
+      status === DisputeStatus.UPHELD
+        ? 'The review stays published as it is.'
+        : status === DisputeStatus.REVIEW_ACTIONED
+          ? dto.reviewAction === 'edit'
+            ? 'A moderator edited the review.'
+            : `The review was ${dto.reviewAction === 'remove' ? 'removed' : 'suspended'}.`
+          : 'The dispute was closed without a change to the review.';
     await this.notify.toBusiness(
       d.businessId,
+      'dispute.update',
       `Decision on your dispute (${d.business.name})`,
+      [outcome, `Decision: ${dto.note}`],
+      {
+        label: 'View your disputes',
+        path: `/dashboard/${d.businessId}/issues`,
+      },
+    );
+    await this.notify.toUser(
+      d.review.userId,
+      'dispute.update',
+      `Update on your review of ${d.business.name}`,
       [
-        dto.decision === 'uphold'
-          ? `We upheld your dispute. The review ${dto.reviewAction === 'remove' ? 'was removed' : 'is now marked as under investigation'}.`
-          : 'We examined the review against our rules and the available evidence and it stays published.',
-        `Decision note: ${dto.note}`,
+        `TalkGround finished reviewing a dispute about your review of ${d.business.name}. ${outcome}`,
+        'If you disagree with this decision, reply to this email to ask for it to be reconsidered.',
       ],
     );
-    if (dto.decision === 'uphold' && dto.reviewAction === 'investigate') {
-      await this.notify.toUser(
-        d.review.userId,
-        'Your review is under investigation',
-        [
-          `${d.business.name} disputed your review and we are looking into it. It stays visible with an "Under investigation" label.`,
-          'You can strengthen your review by attaching supporting evidence (e.g. a receipt).',
-        ],
-        { label: 'View your review', path: `/reviews/${d.reviewId}` },
-      );
-    }
-    return { data: { disputeId: id, status: status.toLowerCase() } };
+    return { data: { id, status: status.toLowerCase() } };
   }
 }

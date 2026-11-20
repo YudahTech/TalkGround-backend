@@ -42,8 +42,7 @@ npm run dev:api
 
 | Email | Password | Role |
 |-------|----------|------|
-| `chinedu.okafor@gmail.com` | `demo1234` | USER |
-| `admin@revyu.ng` | `admin123` | ADMIN |
+| `a seeded demo account` | <demo password, shared privately> | USER |
 
 ## Access model (v1)
 

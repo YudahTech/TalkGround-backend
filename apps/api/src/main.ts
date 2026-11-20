@@ -65,4 +65,4 @@ async function bootstrap() {
   console.log(`Swagger UI: http://localhost:${port}/docs`);
   console.log(`OpenAPI JSON: http://localhost:${port}/docs/openapi.json`);
 }
-bootstrap();
+void bootstrap();

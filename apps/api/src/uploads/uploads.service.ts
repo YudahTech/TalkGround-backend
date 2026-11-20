@@ -9,14 +9,14 @@ import { v2 as cloudinary } from 'cloudinary';
 
 /**
  * - evidence          public review photos
- * - evidence-private  receipts, screenshots, documents (type=authenticated, staff-only signed URLs)
+ * - receipts          private review receipts (type=authenticated, staff-only signed URLs)
  * - logos             business logos
  * - avatars           user avatars
  * - claim-documents   ownership documents (type=authenticated, PRD §7.5: never public)
  */
 export const UPLOAD_FOLDERS = [
   'evidence',
-  'evidence-private',
+  'receipts',
   'logos',
   'avatars',
   'claim-documents',
@@ -24,7 +24,7 @@ export const UPLOAD_FOLDERS = [
 export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
 
 export function isPrivateFolder(folder: UploadFolder): boolean {
-  return folder === 'evidence-private' || folder === 'claim-documents';
+  return folder === 'receipts' || folder === 'claim-documents';
 }
 
 const ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'webp'];
@@ -42,9 +42,9 @@ export class UploadsService {
   private readonly logger = new Logger(UploadsService.name);
 
   constructor(private config: ConfigService) {
-    const cloudName = this.config.get('CLOUDINARY_CLOUD_NAME');
-    const apiKey = this.config.get('CLOUDINARY_API_KEY');
-    const apiSecret = this.config.get('CLOUDINARY_API_SECRET');
+    const cloudName = this.config.get<string>('CLOUDINARY_CLOUD_NAME');
+    const apiKey = this.config.get<string>('CLOUDINARY_API_KEY');
+    const apiSecret = this.config.get<string>('CLOUDINARY_API_SECRET');
 
     if (cloudName && apiKey && apiSecret) {
       cloudinary.config({
@@ -164,7 +164,7 @@ export class UploadsService {
     return {
       url,
       publicId,
-      deliveryType: deliveryType as 'upload' | 'authenticated',
+      deliveryType: deliveryType,
       format: format.toLowerCase(),
     };
   }

@@ -3,6 +3,7 @@ import {
   Controller,
   Delete,
   Get,
+  Header,
   HttpCode,
   Param,
   ParseUUIDPipe,
@@ -10,18 +11,31 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
-import { AdminPermission } from '@prisma/client';
+import {
+  ApiCookieAuth,
+  ApiOperation,
+  ApiProduces,
+  ApiTags,
+} from '@nestjs/swagger';
 import { CurrentUser } from '../common/current-user.decorator';
 import type { AuthUser } from '../common/current-user.decorator';
-import { RequirePermissions } from '../common/permissions';
+import { PERMISSIONS as P, RequirePermissions } from '../common/permissions';
 import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
+import {
+  ApiData,
+  ApiErrors,
+  ApiMessage,
+  ApiPaged,
+} from '../common/api-response';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   AdminUpdateBusinessDto,
   CreateBusinessDto,
   IdentifierInputDto,
 } from '../businesses/businesses.dto';
+import { DuplicateCandidateDto } from '../businesses/businesses.responses';
+import { IdentifierAddedDto } from '../portal/portal.responses';
 import { AdminService } from './admin.service';
 import { ModerationAdminService } from './moderation-admin.service';
 import {
@@ -29,63 +43,96 @@ import {
   AuditQueryDto,
   BusinessStatusDto,
   CreateCategoryDto,
+  CreateCityDto,
   CreateDimensionDto,
   DecideDisputeDto,
   DecideReportDto,
   DisputeQueryDto,
-  EvidenceDecisionDto,
-  InvestigationDto,
+  EditReviewContentDto,
+  EmailLogQueryDto,
+  EvidenceStatusDto,
   MergeBusinessDto,
   ModerateReviewDto,
+  NoindexDto,
   RemoveResponseDto,
   ReportQueryDto,
   ReviewQueueQueryDto,
   SetStaffRoleDto,
   SuspendUserDto,
-  UpsertCategoryDto,
-  UpsertDimensionDto,
+  UpdateCategoryDto,
+  UpdateCityDto,
+  UpdateDimensionDto,
   UserListQueryDto,
 } from './admin.dto';
+import {
+  AdminBusinessDetailDto,
+  AdminBusinessListItemDto,
+  AdminDashboardDto,
+  AdminDisputeDetailDto,
+  AdminDisputeDto,
+  AdminReportDto,
+  AdminReviewDetailDto,
+  AdminUserDetailDto,
+  AdminUserDto,
+  AuditLogDto,
+  CategoryAdminDto,
+  CityAdminDto,
+  DimensionAdminDto,
+  DuplicatePairDto,
+  EmailLogDto,
+  EmailRetryDto,
+  MergeResultDto,
+  ModerationResultDto,
+  QueueItemDto,
+  RolesDto,
+  TaxonomyDto,
+} from './admin.responses';
 
 const uuid = new ParseUUIDPipe({ version: '4' });
-const P = AdminPermission;
 
-@ApiTags('Admin — overview & users')
+@ApiTags('Admin — overview, users, roles, audit')
 @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
+@ApiErrors(401, 403)
 @Controller('admin')
 export class AdminUsersController {
   constructor(
     private admin: AdminService,
     private audit: AuditService,
+    private notifications: NotificationsService,
   ) {}
 
   @RequirePermissions()
-  @ApiOperation({ summary: 'Totals and work queues (any staff member)' })
+  @ApiOperation({ summary: 'Totals and work queues (any staff role)' })
+  @ApiData(AdminDashboardDto)
   @Get('dashboard')
   dashboard() {
     return this.admin.dashboard();
   }
 
-  @RequirePermissions(P.USERS_VIEW)
-  @ApiOperation({ summary: 'Users (filter: all | suspended | staff)' })
+  @RequirePermissions(P.USER_SUSPEND)
+  @ApiOperation({ summary: 'Users — user.suspend' })
+  @ApiPaged(AdminUserDto)
   @Get('users')
   users(@Query() q: UserListQueryDto) {
     return this.admin.listUsers(q);
   }
 
-  @RequirePermissions(P.USERS_VIEW)
-  @ApiOperation({
-    summary: 'User detail with recent reviews and managed businesses',
-  })
+  @RequirePermissions(P.USER_SUSPEND)
+  @ApiOperation({ summary: 'User detail — user.suspend' })
+  @ApiData(AdminUserDetailDto)
+  @ApiErrors(404)
   @Get('users/:id')
   user(@Param('id', uuid) id: string) {
     return this.admin.userDetail(id);
   }
 
-  @RequirePermissions(P.USERS_RESTRICT)
+  @RequirePermissions(P.USER_SUSPEND)
   @ApiOperation({
-    summary: 'Suspend / unsuspend (suspension signs the user out everywhere)',
+    summary:
+      'Suspend / unsuspend (signs the user out everywhere) — user.suspend',
   })
+  @ApiData(AdminUserDto)
+  @ApiErrors(400, 404)
   @Patch('users/:id/suspension')
   suspend(
     @CurrentUser() actor: AuthUser,
@@ -95,75 +142,145 @@ export class AdminUsersController {
     return this.admin.suspendUser(actor, id, dto.suspended, dto.reason);
   }
 
-  @RequirePermissions(P.STAFF_MANAGE)
-  @ApiOperation({ summary: 'Staff roles and their permissions' })
+  @RequirePermissions(P.ROLE_ASSIGN)
+  @ApiOperation({ summary: 'Staff roles and permissions — role.assign' })
+  @ApiData(RolesDto)
   @Get('roles')
   roles() {
     return this.admin.roles();
   }
 
-  @RequirePermissions(P.STAFF_MANAGE)
+  @RequirePermissions(P.ROLE_ASSIGN)
   @ApiOperation({
-    summary: 'Give or remove a staff role (roleKey: null removes)',
+    summary:
+      'Assign or remove a staff role (roleKey null removes) — role.assign',
   })
+  @ApiData(AdminUserDto)
+  @ApiErrors(400, 404, 409)
   @Patch('users/:id/staff-role')
   staffRole(
     @CurrentUser() actor: AuthUser,
     @Param('id', uuid) id: string,
     @Body() dto: SetStaffRoleDto,
   ) {
-    return this.admin.setStaffRole(actor, id, dto.roleKey ?? null);
+    return this.admin.setStaffRole(actor, id, dto.roleKey ?? null, dto.reason);
   }
 
-  @RequirePermissions(P.AUDIT_VIEW)
-  @ApiOperation({ summary: 'Audit log (append-only)' })
+  @RequirePermissions(P.AUDITLOG_EXPORT)
+  @ApiOperation({ summary: 'Audit log (append-only) — auditlog.export' })
+  @ApiPaged(AuditLogDto)
+  @ApiErrors(400)
   @Get('audit-logs')
   auditLogs(@Query() q: AuditQueryDto) {
     return this.audit.list(q);
+  }
+
+  @RequirePermissions(P.AUDITLOG_EXPORT)
+  @ApiOperation({
+    summary:
+      'Export the audit log as CSV (max 10,000 rows per request) — auditlog.export',
+  })
+  @ApiProduces('text/csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  @Header(
+    'Content-Disposition',
+    'attachment; filename="talkground-audit-log.csv"',
+  )
+  @Get('audit-logs/export')
+  async exportAudit(@CurrentUser() actor: AuthUser, @Query() q: AuditQueryDto) {
+    const { page: _p, limit: _l, ...filters } = q;
+    const csv = await this.audit.exportCsv(filters);
+    await this.audit.record(
+      { id: actor.id, role: actor.adminRole ?? undefined },
+      {
+        action: 'auditlog.export',
+        targetType: 'role',
+        targetId: actor.id,
+        metadata: { filters },
+      },
+    );
+    return csv;
+  }
+
+  @RequirePermissions(P.USER_SUSPEND)
+  @ApiOperation({
+    summary: 'Transactional email delivery log (PRD §7.14) — user.suspend',
+  })
+  @ApiPaged(EmailLogDto)
+  @Get('emails')
+  emails(@Query() q: EmailLogQueryDto) {
+    return this.notifications.list(q.status, q.page, q.limit);
+  }
+
+  @RequirePermissions(P.USER_SUSPEND)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Retry a failed email now — user.suspend' })
+  @ApiData(EmailRetryDto)
+  @ApiErrors(404)
+  @Post('emails/:id/retry')
+  retryEmail(@Param('id', uuid) id: string) {
+    return this.notifications.retryOne(id);
   }
 }
 
 @ApiTags('Admin — businesses')
 @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-@RequirePermissions(P.BUSINESSES_MANAGE)
+@ApiErrors(401, 403)
 @Controller('admin/businesses')
 export class AdminBusinessesController {
   constructor(private admin: AdminService) {}
 
-  @ApiOperation({ summary: 'All listings, any status' })
+  @RequirePermissions(P.BUSINESS_EDIT)
+  @ApiOperation({ summary: 'All listings, any status — business.edit' })
+  @ApiPaged(AdminBusinessListItemDto)
   @Get()
   list(@Query() q: AdminBusinessQueryDto) {
     return this.admin.listBusinesses(q);
   }
 
-  @ApiOperation({ summary: 'Likely duplicate pairs across the platform' })
+  @RequirePermissions(P.BUSINESS_EDIT)
+  @ApiOperation({
+    summary:
+      'Possible duplicate pairs (shared identifiers, similar names) — business.edit',
+  })
+  @ApiData(DuplicatePairDto, { isArray: true })
   @Get('duplicates')
   duplicateScan() {
     return this.admin.duplicateScan();
   }
 
+  @RequirePermissions(P.BUSINESS_EDIT)
   @ApiOperation({
     summary:
-      'Listing detail: identifiers, managers, duplicate candidates, audit trail',
+      'Listing detail: identifiers, slugs, members, duplicates, allowed transitions, audit trail — business.edit',
   })
+  @ApiData(AdminBusinessDetailDto)
+  @ApiErrors(404)
   @Get(':id')
   detail(@Param('id', uuid) id: string) {
     return this.admin.businessDetail(id);
   }
 
+  @RequirePermissions(P.BUSINESS_CREATE)
   @ApiOperation({
-    summary: 'Create a listing',
+    summary: 'Create a listing — business.create',
     description:
-      '409 with duplicateCandidates when similar listings exist (resend with confirmNotDuplicate: true if truly different).',
+      '409 with details.duplicateCandidates when possible duplicates exist (resend with confirmNotDuplicate: true).',
   })
+  @ApiData(AdminBusinessDetailDto, { status: 201 })
+  @ApiErrors(400, 409)
   @Post()
   create(@CurrentUser() actor: AuthUser, @Body() dto: CreateBusinessDto) {
     return this.admin.createBusiness(actor, dto);
   }
 
+  @RequirePermissions(P.BUSINESS_EDIT)
   @ApiOperation({
-    summary: 'Edit any field, including name and category (audited)',
+    summary:
+      'Edit any field. Renaming regenerates the slug; the old one 301s. — business.edit',
   })
+  @ApiData(AdminBusinessDetailDto)
+  @ApiErrors(400, 404)
   @Patch(':id')
   update(
     @CurrentUser() actor: AuthUser,
@@ -173,10 +290,10 @@ export class AdminBusinessesController {
     return this.admin.updateBusiness(actor, id, dto);
   }
 
-  @ApiOperation({
-    summary:
-      'Add an identifier (any type, incl. alternative names and CAC number)',
-  })
+  @RequirePermissions(P.BUSINESS_EDIT)
+  @ApiOperation({ summary: 'Add an identifier (any type) — business.edit' })
+  @ApiData(IdentifierAddedDto, { status: 201 })
+  @ApiErrors(400, 404)
   @Post(':id/identifiers')
   addIdentifier(
     @CurrentUser() actor: AuthUser,
@@ -186,7 +303,10 @@ export class AdminBusinessesController {
     return this.admin.addIdentifier(actor, id, dto);
   }
 
-  @ApiOperation({ summary: 'Remove an identifier' })
+  @RequirePermissions(P.BUSINESS_EDIT)
+  @ApiOperation({ summary: 'Remove an identifier — business.edit' })
+  @ApiMessage()
+  @ApiErrors(404)
   @Delete(':id/identifiers/:identifierId')
   removeIdentifier(
     @CurrentUser() actor: AuthUser,
@@ -196,9 +316,13 @@ export class AdminBusinessesController {
     return this.admin.removeIdentifier(actor, id, identifierId);
   }
 
+  @RequirePermissions(P.BUSINESS_EDIT)
   @ApiOperation({
-    summary: 'Publish, suspend, archive, or return to pending review',
+    summary:
+      'Lifecycle transition (PRD §7.4). Suspend / unsuspend also needs business.suspend.',
   })
+  @ApiData(AdminBusinessDetailDto)
+  @ApiErrors(400, 404)
   @Patch(':id/status')
   status(
     @CurrentUser() actor: AuthUser,
@@ -208,31 +332,40 @@ export class AdminBusinessesController {
     return this.admin.setStatus(actor, id, dto);
   }
 
+  @RequirePermissions(P.REVIEW_MODERATE)
   @ApiOperation({
-    summary: 'Mark / clear "under investigation" (shown publicly)',
+    summary: 'Force noindex on / off (e.g. legal complaint) — review.moderate',
   })
-  @Patch(':id/investigation')
-  investigation(
+  @ApiData(AdminBusinessDetailDto)
+  @ApiErrors(404)
+  @Patch(':id/noindex')
+  noindex(
     @CurrentUser() actor: AuthUser,
     @Param('id', uuid) id: string,
-    @Body() dto: InvestigationDto,
+    @Body() dto: NoindexDto,
   ) {
-    return this.admin.setInvestigation(actor, id, dto);
+    return this.admin.setNoindex(actor, id, dto);
   }
 
-  @ApiOperation({ summary: 'Duplicate candidates for one listing' })
+  @RequirePermissions(P.BUSINESS_EDIT)
+  @ApiOperation({
+    summary: 'Possible duplicates of one listing — business.edit',
+  })
+  @ApiData(DuplicateCandidateDto, { isArray: true })
+  @ApiErrors(404)
   @Get(':id/duplicates')
   duplicates(@Param('id', uuid) id: string) {
     return this.admin.duplicatesOf(id);
   }
 
-  @RequirePermissions(P.BUSINESSES_MANAGE, P.BUSINESSES_MERGE)
+  @RequirePermissions(P.BUSINESS_MERGE)
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Merge this listing (source) into targetId',
-    description:
-      'Moves identifiers, locations, reviews, responses, disputes, claims and managers. The source becomes "merged" and redirects.',
+    summary:
+      'Merge this listing into targetId (moves reviews; old URL 301s) — business.merge',
   })
+  @ApiData(MergeResultDto)
+  @ApiErrors(400, 404)
   @Post(':id/merge')
   merge(
     @CurrentUser() actor: AuthUser,
@@ -245,36 +378,42 @@ export class AdminBusinessesController {
 
 @ApiTags('Admin — moderation')
 @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
+@ApiErrors(401, 403)
 @Controller('admin')
 export class AdminModerationController {
   constructor(private moderation: ModerationAdminService) {}
 
-  @RequirePermissions(P.REVIEWS_MODERATE)
+  @RequirePermissions(P.REVIEW_MODERATE)
   @ApiOperation({
     summary:
-      'Review queues: pending_moderation | under_investigation | reported | evidence | removed',
+      'Review queues: pending | under_investigation | reported | evidence | suspended | removed — review.moderate',
   })
+  @ApiPaged(QueueItemDto)
   @Get('reviews')
   queue(@Query() q: ReviewQueueQueryDto) {
     return this.moderation.queue(q);
   }
 
-  @RequirePermissions(P.REVIEWS_MODERATE)
+  @RequirePermissions(P.REVIEW_MODERATE)
   @ApiOperation({
     summary:
-      'Full review: revisions, flags, reports, disputes, evidence (private links need EVIDENCE_REVIEW), history',
+      'Full review incl. edit history; receipt links need evidence.review — review.moderate',
   })
+  @ApiData(AdminReviewDetailDto)
+  @ApiErrors(404)
   @Get('reviews/:id')
   review(@CurrentUser() actor: AuthUser, @Param('id', uuid) id: string) {
     return this.moderation.reviewDetail(actor, id);
   }
 
-  @RequirePermissions(P.REVIEWS_MODERATE)
+  @RequirePermissions(P.REVIEW_MODERATE)
   @HttpCode(200)
   @ApiOperation({
     summary:
-      'Moderate a review (policy reason required; removal cannot use NO_VIOLATION)',
+      'Publish, suspend, remove, restore or investigate (recorded reason) — review.moderate',
   })
+  @ApiData(ModerationResultDto)
+  @ApiErrors(400, 404)
   @Post('reviews/:id/moderation')
   moderate(
     @CurrentUser() actor: AuthUser,
@@ -284,25 +423,46 @@ export class AdminModerationController {
     return this.moderation.moderateReview(actor, id, dto);
   }
 
+  @RequirePermissions(P.REVIEW_MODERATE)
+  @ApiOperation({
+    summary:
+      'Edit review content (e.g. redact personal info); the previous version is kept — review.moderate',
+  })
+  @ApiData(ModerationResultDto)
+  @ApiErrors(400, 404)
+  @Patch('reviews/:id/content')
+  edit(
+    @CurrentUser() actor: AuthUser,
+    @Param('id', uuid) id: string,
+    @Body() dto: EditReviewContentDto,
+  ) {
+    return this.moderation.editReviewContent(actor, id, dto);
+  }
+
   @RequirePermissions(P.EVIDENCE_REVIEW)
   @ApiOperation({
     summary:
-      'Examine evidence: accepted shows "Evidence reviewed"; rejected hides it',
+      'Set evidenceStatus after examining the evidence — evidence.review',
   })
-  @Patch('evidence/:id')
+  @ApiData(ModerationResultDto)
+  @ApiErrors(400, 404)
+  @Patch('reviews/:id/evidence-status')
   evidence(
     @CurrentUser() actor: AuthUser,
     @Param('id', uuid) id: string,
-    @Body() dto: EvidenceDecisionDto,
+    @Body() dto: EvidenceStatusDto,
   ) {
-    return this.moderation.decideEvidence(actor, id, dto);
+    return this.moderation.setEvidenceStatus(actor, id, dto);
   }
 
-  @RequirePermissions(P.REVIEWS_MODERATE)
+  @RequirePermissions(P.REVIEW_MODERATE)
   @HttpCode(200)
   @ApiOperation({
-    summary: 'Remove a business response that breaks content rules',
+    summary:
+      'Remove a business response that breaks the content policy — review.moderate',
   })
+  @ApiData(ModerationResultDto)
+  @ApiErrors(400, 404, 409)
   @Post('responses/:id/remove')
   removeResponse(
     @CurrentUser() actor: AuthUser,
@@ -312,17 +472,24 @@ export class AdminModerationController {
     return this.moderation.removeResponse(actor, id, dto);
   }
 
-  @RequirePermissions(P.REPORTS_MANAGE)
-  @ApiOperation({ summary: 'Review reports (default: open, oldest first)' })
+  @RequirePermissions(P.REPORT_RESOLVE)
+  @ApiOperation({
+    summary:
+      'Reports on reviews and responses (default: open) — report.resolve',
+  })
+  @ApiPaged(AdminReportDto)
   @Get('reports')
   reports(@Query() q: ReportQueryDto) {
     return this.moderation.reports(q.status, q.page, q.limit);
   }
 
-  @RequirePermissions(P.REPORTS_MANAGE, P.REVIEWS_MODERATE)
+  @RequirePermissions(P.REPORT_RESOLVE)
   @ApiOperation({
-    summary: 'Decide a report: dismiss, remove_review or investigate_review',
+    summary:
+      'Decide a report: dismiss, suspend, remove or investigate — report.resolve',
   })
+  @ApiData(ModerationResultDto)
+  @ApiErrors(400, 404, 409)
   @Patch('reports/:id')
   decideReport(
     @CurrentUser() actor: AuthUser,
@@ -332,22 +499,48 @@ export class AdminModerationController {
     return this.moderation.decideReport(actor, id, dto);
   }
 
-  @RequirePermissions(P.DISPUTES_MANAGE)
-  @ApiOperation({ summary: 'Business disputes (default: open, oldest first)' })
+  @RequirePermissions(P.DISPUTE_DECIDE)
+  @ApiOperation({
+    summary:
+      'Business disputes (default: active = open + under_review) — dispute.decide',
+  })
+  @ApiPaged(AdminDisputeDto)
   @Get('disputes')
   disputes(@Query() q: DisputeQueryDto) {
     return this.moderation.disputes(q.status, q.page, q.limit);
   }
 
-  @RequirePermissions(P.DISPUTES_MANAGE)
-  @ApiOperation({ summary: 'Dispute with the full review and its history' })
+  @RequirePermissions(P.DISPUTE_DECIDE)
+  @ApiOperation({
+    summary: 'Dispute with the full review and its history — dispute.decide',
+  })
+  @ApiData(AdminDisputeDetailDto)
+  @ApiErrors(404)
   @Get('disputes/:id')
   dispute(@CurrentUser() actor: AuthUser, @Param('id', uuid) id: string) {
     return this.moderation.disputeDetail(actor, id);
   }
 
-  @RequirePermissions(P.DISPUTES_MANAGE, P.REVIEWS_MODERATE)
-  @ApiOperation({ summary: 'Decide a dispute (both parties are notified)' })
+  @RequirePermissions(P.DISPUTE_DECIDE)
+  @HttpCode(200)
+  @ApiOperation({
+    summary:
+      'Take a dispute under review (OPEN → UNDER_REVIEW) — dispute.decide',
+  })
+  @ApiData(ModerationResultDto)
+  @ApiErrors(404, 409)
+  @Post('disputes/:id/start-review')
+  startReview(@CurrentUser() actor: AuthUser, @Param('id', uuid) id: string) {
+    return this.moderation.startDisputeReview(actor, id);
+  }
+
+  @RequirePermissions(P.DISPUTE_DECIDE)
+  @ApiOperation({
+    summary:
+      'Decide: upheld (review stays) | review_actioned | closed. Both parties are emailed. — dispute.decide',
+  })
+  @ApiData(ModerationResultDto)
+  @ApiErrors(400, 404, 409)
   @Patch('disputes/:id')
   decideDispute(
     @CurrentUser() actor: AuthUser,
@@ -358,20 +551,29 @@ export class AdminModerationController {
   }
 }
 
-@ApiTags('Admin — categories & rating dimensions')
+@ApiTags('Admin — categories, dimensions & cities')
 @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-@RequirePermissions(P.TAXONOMY_MANAGE)
+@RequirePermissions(P.CATEGORY_MANAGE)
+@ApiErrors(401, 403)
 @Controller('admin')
 export class AdminTaxonomyController {
   constructor(private admin: AdminService) {}
 
-  @ApiOperation({ summary: 'All categories (incl. inactive) and dimensions' })
+  @ApiOperation({
+    summary:
+      'All categories (incl. inactive), dimensions and cities — category.manage',
+  })
+  @ApiData(TaxonomyDto)
   @Get('taxonomy')
   list() {
     return this.admin.listTaxonomy();
   }
 
-  @ApiOperation({ summary: 'Add a category (no code change needed — PRD §5)' })
+  @ApiOperation({
+    summary: 'Add a category (no deploy needed) — category.manage',
+  })
+  @ApiData(CategoryAdminDto, { status: 201 })
+  @ApiErrors(400, 409)
   @Post('categories')
   createCategory(
     @CurrentUser() actor: AuthUser,
@@ -381,18 +583,23 @@ export class AdminTaxonomyController {
   }
 
   @ApiOperation({
-    summary: 'Edit a category and (optionally) replace its rating dimensions',
+    summary:
+      'Edit or (de)activate a category; optionally replace its dimensions — category.manage',
   })
+  @ApiData(CategoryAdminDto)
+  @ApiErrors(400, 404)
   @Patch('categories/:slug')
   updateCategory(
     @CurrentUser() actor: AuthUser,
     @Param('slug') slug: string,
-    @Body() dto: UpsertCategoryDto,
+    @Body() dto: UpdateCategoryDto,
   ) {
     return this.admin.updateCategory(actor, slug, dto);
   }
 
-  @ApiOperation({ summary: 'Add a rating dimension' })
+  @ApiOperation({ summary: 'Add a rating dimension — category.manage' })
+  @ApiData(DimensionAdminDto, { status: 201 })
+  @ApiErrors(400, 409)
   @Post('dimensions')
   createDimension(
     @CurrentUser() actor: AuthUser,
@@ -401,13 +608,37 @@ export class AdminTaxonomyController {
     return this.admin.createDimension(actor, dto);
   }
 
-  @ApiOperation({ summary: 'Edit or deactivate a rating dimension' })
+  @ApiOperation({
+    summary: 'Edit or deactivate a rating dimension — category.manage',
+  })
+  @ApiData(DimensionAdminDto)
+  @ApiErrors(400, 404)
   @Patch('dimensions/:key')
   updateDimension(
     @CurrentUser() actor: AuthUser,
     @Param('key') key: string,
-    @Body() dto: UpsertDimensionDto,
+    @Body() dto: UpdateDimensionDto,
   ) {
     return this.admin.updateDimension(actor, key, dto);
+  }
+
+  @ApiOperation({ summary: 'Add a city (no deploy needed) — category.manage' })
+  @ApiData(CityAdminDto, { status: 201 })
+  @ApiErrors(400, 409)
+  @Post('cities')
+  createCity(@CurrentUser() actor: AuthUser, @Body() dto: CreateCityDto) {
+    return this.admin.createCity(actor, dto);
+  }
+
+  @ApiOperation({ summary: 'Edit or (de)activate a city — category.manage' })
+  @ApiData(CityAdminDto)
+  @ApiErrors(400, 404)
+  @Patch('cities/:slug')
+  updateCity(
+    @CurrentUser() actor: AuthUser,
+    @Param('slug') slug: string,
+    @Body() dto: UpdateCityDto,
+  ) {
+    return this.admin.updateCity(actor, slug, dto);
   }
 }

@@ -10,14 +10,14 @@
 
 | Item | Example |
 |------|---------|
-| API base | `https://revyu-backend.onrender.com/api/v1` |
-| Swagger | `https://revyu-backend.onrender.com/docs` |
-| OpenAPI JSON | `https://revyu-backend.onrender.com/docs/openapi.json` |
+| API base | `https://<staging-api-host>/api/v1` |
+| Swagger | `https://<staging-api-host>/docs` |
+| OpenAPI JSON | `https://<staging-api-host>/docs/openapi.json` |
 
 Frontend sets:
 
 ```env
-NEXT_PUBLIC_API_URL=https://revyu-backend.onrender.com/api/v1
+NEXT_PUBLIC_API_URL=https://<staging-api-host>/api/v1
 ```
 
 ---
@@ -91,7 +91,7 @@ Paste that as `DATABASE_URL` on the web service (Step 3).
 
 | Setting | Value |
 |---------|--------|
-| **Name** | `talkground-backend` (the URL stays `revyu-backend.onrender.com`) |
+| **Name** | `talkground-backend` (the URL stays `<staging-api-host>`) |
 | **Region** | Same as Postgres |
 | **Root Directory** | `apps/api` |
 | **Runtime** | Node |
@@ -201,7 +201,7 @@ npx prisma migrate deploy
 npx prisma db seed
 ```
 
-Then check: `https://revyu-backend.onrender.com/api/v1/home` → `stats.totalBrands` > 0.
+Then check: `https://<staging-api-host>/api/v1/home` → `stats.totalBrands` > 0.
 
 See [Neon + Render (recommended)](#neon--render-recommended) for the full Neon checklist.
 
@@ -209,8 +209,7 @@ Seed creates:
 
 | Email | Password | Role |
 |-------|----------|------|
-| `chinedu.okafor@gmail.com` | `demo1234` | USER |
-| `admin@revyu.ng` | `admin123` | ADMIN |
+| `a seeded demo account` | <demo password, shared privately> | USER |
 
 Plus sample brands (some with `claimed: true`).
 
@@ -220,8 +219,8 @@ Plus sample brands (some with `claimed: true`).
 
 | Env | Value |
 |-----|--------|
-| `NEXT_PUBLIC_API_URL` | `https://revyu-backend.onrender.com/api/v1` |
-| Swagger (manual testing) | `https://revyu-backend.onrender.com/docs` |
+| `NEXT_PUBLIC_API_URL` | `https://<staging-api-host>/api/v1` |
+| Swagger (manual testing) | `https://<staging-api-host>/docs` |
 
 If cold start is slow, tell them: wait ~1 minute on first hit after idle.
 
@@ -327,13 +326,12 @@ npx prisma db seed
 
 | Email | Password | Role |
 |-------|----------|------|
-| `chinedu.okafor@gmail.com` | `demo1234` | USER |
-| `admin@revyu.ng` | `admin123` | ADMIN |
+| `a seeded demo account` | <demo password, shared privately> | USER |
 
 ### Verify
 
 - [ ] Render logs show Nest started (no Prisma connection errors)
-- [ ] `https://revyu-backend.onrender.com/api/v1/home` returns JSON
+- [ ] `https://<staging-api-host>/api/v1/home` returns JSON
 - [ ] `/docs` → login with seeded user works
 - [ ] Neon dashboard → **Tables** shows `User`, `Brand`, `Review`, etc.
 

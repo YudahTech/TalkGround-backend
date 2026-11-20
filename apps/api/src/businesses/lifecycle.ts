@@ -1,74 +1,77 @@
+import { BadRequestException } from '@nestjs/common';
 import { BusinessStatus, OwnershipStatus } from '@prisma/client';
+import type { OwnershipDto } from './businesses.responses';
 
-/**
- * PRD §7.4 listing lifecycle, derived from two independent columns.
- * "suggested" lives in BusinessSubmission (a suggestion is not yet a listing), so a Business
- * row starts at "pending_review" at the earliest.
- */
-export type LifecycleStage =
-  | 'suggested'
-  | 'pending_review'
-  | 'published_unclaimed'
-  | 'claim_pending'
-  | 'claimed_managed'
-  | 'ownership_verified'
-  | 'suspended'
-  | 'merged'
-  | 'archived';
+/** PRD v2.5 §7.4 — the only allowed status transitions. */
+const TRANSITIONS: Record<BusinessStatus, BusinessStatus[]> = {
+  SUGGESTED: [BusinessStatus.PENDING_REVIEW],
+  PENDING_REVIEW: [BusinessStatus.PUBLISHED, BusinessStatus.REJECTED],
+  PUBLISHED: [
+    BusinessStatus.SUSPENDED,
+    BusinessStatus.MERGED,
+    BusinessStatus.ARCHIVED,
+  ],
+  SUSPENDED: [
+    BusinessStatus.PUBLISHED,
+    BusinessStatus.MERGED,
+    BusinessStatus.ARCHIVED,
+  ],
+  REJECTED: [],
+  MERGED: [],
+  ARCHIVED: [],
+};
 
-export function lifecycleStage(b: {
-  status: BusinessStatus;
-  ownershipStatus: OwnershipStatus;
-}): LifecycleStage {
-  switch (b.status) {
-    case BusinessStatus.PENDING_REVIEW:
-      return 'pending_review';
-    case BusinessStatus.SUSPENDED:
-      return 'suspended';
-    case BusinessStatus.MERGED:
-      return 'merged';
-    case BusinessStatus.ARCHIVED:
-      return 'archived';
-  }
-  switch (b.ownershipStatus) {
-    case OwnershipStatus.CLAIM_PENDING:
-      return 'claim_pending';
-    case OwnershipStatus.CLAIMED:
-      return 'claimed_managed';
-    case OwnershipStatus.VERIFIED:
-      return 'ownership_verified';
-    default:
-      return 'published_unclaimed';
+export function canTransition(
+  from: BusinessStatus,
+  to: BusinessStatus,
+): boolean {
+  return TRANSITIONS[from].includes(to);
+}
+
+export function assertTransition(from: BusinessStatus, to: BusinessStatus) {
+  if (!canTransition(from, to)) {
+    throw new BadRequestException(
+      `A business cannot move from ${from.toLowerCase()} to ${to.toLowerCase()}. Allowed: ${
+        TRANSITIONS[from].map((s) => s.toLowerCase()).join(', ') || 'none'
+      }.`,
+    );
   }
 }
 
+export const LISTING_DISCLAIMER =
+  'A public listing does not mean TalkGround endorses or has verified this business.';
+
 /**
- * Public ownership badge (PRD §7.3, §7.5). The wording is deliberate: verification confirms
- * control of the profile, never the quality or legitimacy of the business.
+ * Public ownership badge (PRD §7.3, §7.5). Verification confirms control of the profile, never
+ * the quality or legitimacy of the business. A pending claim proves nothing, so it is shown as
+ * unclaimed.
  */
-export function ownershipBadge(status: OwnershipStatus) {
-  switch (status) {
-    case OwnershipStatus.VERIFIED:
-      return {
-        status: 'ownership_verified',
-        label: 'Ownership verified',
-        description:
-          'TalkGround confirmed that the people managing this profile control the business. This is not an endorsement and says nothing about service quality.',
-      };
-    case OwnershipStatus.CLAIMED:
-      return {
-        status: 'claimed',
-        label: 'Claimed',
-        description:
-          'This profile is managed by a representative of the business. Ownership has not been fully verified.',
-      };
-    default:
-      // CLAIM_PENDING is shown publicly as unclaimed: a pending request proves nothing yet.
-      return {
-        status: 'unclaimed',
-        label: 'Unclaimed',
-        description:
-          'Nobody from this business manages this profile yet. Listing a business does not mean TalkGround endorses it.',
-      };
+export function ownershipBadge(
+  status: OwnershipStatus,
+  verified: boolean,
+): OwnershipDto {
+  if (status === OwnershipStatus.CLAIMED && verified) {
+    return {
+      status: 'claimed',
+      ownershipVerified: true,
+      label: 'Ownership verified',
+      description:
+        'TalkGround staff confirmed that the people managing this profile control the business. This is not an endorsement and says nothing about service quality.',
+    };
   }
+  if (status === OwnershipStatus.CLAIMED) {
+    return {
+      status: 'claimed',
+      ownershipVerified: false,
+      label: 'Claimed',
+      description:
+        'This profile is managed by a representative of the business. Ownership has not been verified.',
+    };
+  }
+  return {
+    status: 'unclaimed',
+    ownershipVerified: false,
+    label: 'Unclaimed',
+    description: 'Nobody from this business manages this profile yet.',
+  };
 }

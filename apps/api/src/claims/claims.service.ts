@@ -8,7 +8,6 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  AdminPermission,
   BusinessStatus,
   ClaimStatus,
   IdentifierType,
@@ -24,6 +23,7 @@ import { AuditService } from '../audit/audit.service';
 import { EmailService } from '../email/email.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { RevalidationService } from '../revalidation/revalidation.service';
 import {
   SOCIAL_IDENTIFIER_TYPES,
   normalizeDomain,
@@ -39,6 +39,16 @@ import type {
   RejectClaimDto,
   SetOwnershipDto,
 } from './claims.dto';
+import type {
+  AdminClaimDetailDto,
+  AdminClaimListItemDto,
+  ClaimCreatedDto,
+  ClaimDecisionDto,
+  ClaimDto,
+  ClaimInstructionsDto,
+  DomainCheckDto,
+  OwnershipChangeDto,
+} from './claims.responses';
 
 const CODE_TTL_MS = 15 * 60 * 1000;
 const MAX_CODE_ATTEMPTS = 5;
@@ -60,11 +70,15 @@ const FREE_EMAIL_DOMAINS = new Set([
   'zoho.com',
 ]);
 
-type ClaimWithBusiness = Prisma.BusinessClaimGetPayload<{
+type ClaimRow = Prisma.BusinessClaimGetPayload<{
   include: { business: { include: { identifiers: true } }; documents: true };
 }>;
 
-/** PRD §7.5 ownership claims. Approval always needs a staff decision (step 5 "TalkGround reviews"). */
+/**
+ * PRD v2.5 §7.5 ownership claims. Staff decide every claim. Approval sets ownershipStatus CLAIMED;
+ * ownershipVerified is set only when the evidence was actually checked. Ownership never changes
+ * ratings, ranking, indexing or any score.
+ */
 @Injectable()
 export class ClaimsService {
   private readonly logger = new Logger(ClaimsService.name);
@@ -76,6 +90,7 @@ export class ClaimsService {
     private email: EmailService,
     private notify: NotificationsService,
     private uploads: UploadsService,
+    private revalidate: RevalidationService,
   ) {}
 
   private get secret() {
@@ -92,34 +107,34 @@ export class ClaimsService {
       : `TG-${mac.slice(0, 8).toUpperCase()}`;
   }
 
-  private instructions(claim: {
+  private instructions(c: {
     id: string;
     method: VerificationMethod;
     verificationTarget: string | null;
-  }) {
-    switch (claim.method) {
+  }): ClaimInstructionsDto {
+    switch (c.method) {
       case VerificationMethod.BUSINESS_EMAIL:
         return {
-          summary: `Enter the 6-digit code we emailed to ${claim.verificationTarget}.`,
+          summary: `Enter the 6-digit code we emailed to ${c.verificationTarget}.`,
         };
       case VerificationMethod.WEBSITE_DOMAIN:
         return {
-          summary: `Add this DNS TXT record to ${claim.verificationTarget}, then press "Check domain".`,
+          summary: `Add this DNS TXT record to ${c.verificationTarget}, then press "Check domain".`,
           dnsRecord: {
             type: 'TXT',
             host: '@',
-            value: `talkground-verification=${this.derived('domain', claim.id)}`,
+            value: `talkground-verification=${this.derived('domain', c.id)}`,
           },
         };
       case VerificationMethod.SOCIAL_ACCOUNT:
         return {
-          summary: `Add the code ${this.derived('social', claim.id)} to the bio of ${claim.verificationTarget} until we confirm your claim. Our team checks it manually.`,
-          code: this.derived('social', claim.id),
+          summary: `Add the code ${this.derived('social', c.id)} to the bio of ${c.verificationTarget} until your claim is decided. Our team checks it.`,
+          code: this.derived('social', c.id),
         };
       case VerificationMethod.DOCUMENTS:
         return {
           summary:
-            'Upload documents that show you run this business (e.g. CAC certificate, utility bill in the business name). Files are private and only seen by authorised TalkGround staff.',
+            'Upload documents that show you run this business (for example a CAC certificate or an invoice in the business name). Files are private and only seen by authorised TalkGround staff.',
         };
       default:
         return {
@@ -129,15 +144,14 @@ export class ClaimsService {
     }
   }
 
-  private presentForClaimant(c: ClaimWithBusiness) {
+  private present(c: ClaimRow): ClaimDto {
     return {
       id: c.id,
       status: c.status.toLowerCase(),
       method: c.method.toLowerCase(),
       claimantRole: c.claimantRole,
       verificationTarget: c.verificationTarget,
-      verified: !!c.verificationConfirmedAt,
-      verifiedAt: c.verificationConfirmedAt,
+      verificationConfirmed: !!c.verificationConfirmedAt,
       instructions:
         c.status === ClaimStatus.PENDING ? this.instructions(c) : null,
       documents: c.documents.map((d) => ({
@@ -145,18 +159,18 @@ export class ClaimsService {
         label: d.label,
         createdAt: d.createdAt,
       })),
-      decisionNote: c.status === ClaimStatus.PENDING ? null : c.decisionNote,
+      decisionReason: c.decisionReason,
       business: {
         id: c.business.id,
         slug: c.business.slug,
         name: c.business.name,
       },
       createdAt: c.createdAt,
-      reviewedAt: c.reviewedAt,
+      decidedAt: c.decidedAt,
     };
   }
 
-  private async load(id: string): Promise<ClaimWithBusiness> {
+  private async load(id: string): Promise<ClaimRow> {
     const claim = await this.prisma.businessClaim.findUnique({
       where: { id },
       include: {
@@ -170,14 +184,14 @@ export class ClaimsService {
 
   private async ownPending(user: AuthUser, id: string) {
     const claim = await this.load(id);
-    if (claim.claimantId !== user.id)
+    if (claim.userId !== user.id)
       throw new ForbiddenException('This is not your claim');
     if (claim.status !== ClaimStatus.PENDING)
-      throw new ConflictException('This claim is closed');
+      throw new ConflictException('This claim was already decided');
     return claim;
   }
 
-  /** Validate that the proof target actually belongs to the listing. */
+  /** The proof target must belong to the listing. */
   private resolveTarget(
     method: VerificationMethod,
     raw: string | undefined,
@@ -194,13 +208,15 @@ export class ClaimsService {
           );
         }
         const domain = email.split('@')[1];
-        const listedEmail = has(IdentifierType.EMAIL, email);
-        const websiteDomain =
-          !FREE_EMAIL_DOMAINS.has(domain) &&
-          has(IdentifierType.WEBSITE, domain);
-        if (!listedEmail && !websiteDomain) {
+        if (
+          !has(IdentifierType.EMAIL, email) &&
+          !(
+            !FREE_EMAIL_DOMAINS.has(domain) &&
+            has(IdentifierType.WEBSITE, domain)
+          )
+        ) {
           throw new BadRequestException(
-            "Use an email address on the business's website domain, or the business's listed public email. Otherwise choose another verification method.",
+            "Use an email on the business's website domain or its listed email, or choose another method (for example social account).",
           );
         }
         return email;
@@ -261,22 +277,24 @@ export class ClaimsService {
 
   // ───────────────────────────────────────────────────────────── claimant
 
-  async create(user: AuthUser, businessId: string, dto: CreateClaimDto) {
+  async create(
+    user: AuthUser,
+    businessId: string,
+    dto: CreateClaimDto,
+  ): Promise<{ data: ClaimCreatedDto }> {
     if (!user.emailVerified)
       throw new ForbiddenException('Verify your email address first');
     const business = await this.prisma.business.findUnique({
       where: { id: businessId },
       include: { identifiers: true },
     });
-    if (!business || business.status !== BusinessStatus.PUBLISHED) {
+    if (!business || business.status !== BusinessStatus.PUBLISHED)
       throw new NotFoundException('Business not found');
-    }
-    const alreadyManager = await this.prisma.businessMember.findUnique({
+    const member = await this.prisma.businessMember.findUnique({
       where: { businessId_userId: { businessId, userId: user.id } },
     });
-    if (alreadyManager && !alreadyManager.revokedAt) {
+    if (member && !member.revokedAt)
       throw new ConflictException('You already manage this business');
-    }
     if (dto.method === VerificationMethod.MANUAL_REVIEW && !dto.message) {
       throw new BadRequestException(
         'Explain how you are connected to the business (message)',
@@ -287,14 +305,13 @@ export class ClaimsService {
       dto.verificationTarget,
       business.identifiers,
     );
-
-    let claim;
+    let claimId: string;
     try {
-      claim = await this.prisma.$transaction(async (tx) => {
+      claimId = await this.prisma.$transaction(async (tx) => {
         const created = await tx.businessClaim.create({
           data: {
             businessId,
-            claimantId: user.id,
+            userId: user.id,
             method: dto.method,
             claimantRole: cleanText(dto.claimantRole),
             message: dto.message ? cleanText(dto.message) : null,
@@ -308,7 +325,21 @@ export class ClaimsService {
             data: { ownershipStatus: OwnershipStatus.CLAIM_PENDING },
           });
         }
-        return created;
+        await this.audit.record(
+          { id: user.id },
+          {
+            action: 'claim.submit',
+            targetType: 'claim',
+            targetId: created.id,
+            after: {
+              status: ClaimStatus.PENDING,
+              method: dto.method,
+              businessId,
+            },
+          },
+          tx,
+        );
+        return created.id;
       });
     } catch (err) {
       if (
@@ -316,34 +347,30 @@ export class ClaimsService {
         err.code === 'P2002'
       ) {
         throw new ConflictException(
-          'You already have an open claim for this business',
+          'You already have a pending claim for this business',
         );
       }
       throw err;
     }
     const extra =
       dto.method === VerificationMethod.BUSINESS_EMAIL
-        ? await this.sendEmailCode(claim.id, target!, business.name)
+        ? await this.sendEmailCode(claimId, target!, business.name)
         : {};
-    const full = await this.load(claim.id);
     return {
       data: {
-        ...this.presentForClaimant(full),
+        ...this.present(await this.load(claimId)),
         ...extra,
-        alreadyManaged:
-          business.ownershipStatus === OwnershipStatus.CLAIMED ||
-          business.ownershipStatus === OwnershipStatus.VERIFIED,
+        alreadyManaged: business.ownershipStatus === OwnershipStatus.CLAIMED,
       },
     };
   }
 
   async resendEmailCode(user: AuthUser, id: string) {
     const claim = await this.ownPending(user, id);
-    if (claim.method !== VerificationMethod.BUSINESS_EMAIL) {
+    if (claim.method !== VerificationMethod.BUSINESS_EMAIL)
       throw new BadRequestException(
         'This claim does not use email verification',
       );
-    }
     if (claim.verificationConfirmedAt)
       throw new BadRequestException('Email already confirmed');
     return {
@@ -358,25 +385,27 @@ export class ClaimsService {
     };
   }
 
-  async confirmEmailCode(user: AuthUser, id: string, code: string) {
+  async confirmEmailCode(
+    user: AuthUser,
+    id: string,
+    code: string,
+  ): Promise<{ data: ClaimDto }> {
     const claim = await this.ownPending(user, id);
     if (
       claim.method !== VerificationMethod.BUSINESS_EMAIL ||
       !claim.verificationSecretHash
     ) {
+      if (claim.verificationConfirmedAt) return { data: this.present(claim) };
       throw new BadRequestException('No code was sent for this claim');
     }
-    if (claim.verificationConfirmedAt)
-      return { data: this.presentForClaimant(claim) };
     if (
       !claim.verificationExpiresAt ||
       claim.verificationExpiresAt < new Date()
     ) {
       throw new BadRequestException('Code expired. Request a new one.');
     }
-    if (claim.verificationAttempts >= MAX_CODE_ATTEMPTS) {
+    if (claim.verificationAttempts >= MAX_CODE_ATTEMPTS)
       throw new BadRequestException('Too many wrong codes. Request a new one.');
-    }
     if (
       !safeEqualHex(claim.verificationSecretHash, hmacCode(code, this.secret))
     ) {
@@ -393,11 +422,14 @@ export class ClaimsService {
         verificationSecretHash: null,
       },
     });
-    return { data: this.presentForClaimant(await this.load(id)) };
+    return { data: this.present(await this.load(id)) };
   }
 
-  /** Look up the TXT record. Only the listed domain is queried, so this cannot be pointed elsewhere. */
-  async checkDomain(user: AuthUser, id: string) {
+  /** Looks up the TXT record of the listed domain only, so it cannot be pointed at other hosts. */
+  async checkDomain(
+    user: AuthUser,
+    id: string,
+  ): Promise<{ data: DomainCheckDto }> {
     const claim = await this.ownPending(user, id);
     if (
       claim.method !== VerificationMethod.WEBSITE_DOMAIN ||
@@ -437,20 +469,16 @@ export class ClaimsService {
       data: { verificationConfirmedAt: new Date() },
     });
     return {
-      data: {
-        verified: true,
-        claim: this.presentForClaimant(await this.load(id)),
-      },
+      data: { verified: true, claim: this.present(await this.load(id)) },
     };
   }
 
   async addDocument(user: AuthUser, id: string, dto: AddClaimDocumentDto) {
     const claim = await this.ownPending(user, id);
-    if (claim.documents.length >= MAX_DOCUMENTS) {
+    if (claim.documents.length >= MAX_DOCUMENTS)
       throw new BadRequestException(
         `At most ${MAX_DOCUMENTS} documents per claim`,
       );
-    }
     const asset = await this.uploads.verifyAsset(dto.url, 'claim-documents');
     const doc = await this.prisma.claimDocument.create({
       data: {
@@ -464,27 +492,18 @@ export class ClaimsService {
     return { data: { id: doc.id, label: doc.label, createdAt: doc.createdAt } };
   }
 
-  async cancel(user: AuthUser, id: string) {
-    const claim = await this.ownPending(user, id);
-    await this.prisma.$transaction(async (tx) => {
-      await tx.businessClaim.update({
-        where: { id },
-        data: { status: ClaimStatus.CANCELLED, pendingKey: null },
-      });
-      await this.releasePendingOwnership(claim.businessId, tx);
-    });
-    return { data: { message: 'Claim cancelled' } };
-  }
-
-  async getForClaimant(user: AuthUser, id: string) {
+  async getForClaimant(
+    user: AuthUser,
+    id: string,
+  ): Promise<{ data: ClaimDto }> {
     const claim = await this.load(id);
-    if (claim.claimantId !== user.id)
+    if (claim.userId !== user.id)
       throw new ForbiddenException('This is not your claim');
-    return { data: this.presentForClaimant(claim) };
+    return { data: this.present(claim) };
   }
 
   async mine(userId: string, page: number, limit: number) {
-    const where = { claimantId: userId };
+    const where = { userId };
     const [rows, total] = await Promise.all([
       this.prisma.businessClaim.findMany({
         where,
@@ -498,36 +517,44 @@ export class ClaimsService {
       this.prisma.businessClaim.count({ where }),
     ]);
     return {
-      data: rows.map((c) => this.presentForClaimant(c)),
+      data: rows.map((c) => this.present(c)),
       meta: pageMeta(page, limit, total),
     };
   }
 
-  /** CLAIM_PENDING drops back to UNCLAIMED when the last open claim closes without approval. */
+  /** CLAIM_PENDING drops back to UNCLAIMED when the last pending claim is rejected. */
   private async releasePendingOwnership(
     businessId: string,
     tx: Prisma.TransactionClient,
   ) {
-    const business = await tx.business.findUniqueOrThrow({
+    const b = await tx.business.findUniqueOrThrow({
       where: { id: businessId },
     });
-    if (business.ownershipStatus !== OwnershipStatus.CLAIM_PENDING) return;
+    if (b.ownershipStatus !== OwnershipStatus.CLAIM_PENDING) return;
     const open = await tx.businessClaim.count({
       where: { businessId, status: ClaimStatus.PENDING },
     });
-    if (!open) {
+    if (!open)
       await tx.business.update({
         where: { id: businessId },
         data: { ownershipStatus: OwnershipStatus.UNCLAIMED },
       });
-    }
   }
 
   // ──────────────────────────────────────────────────────────────── staff
 
-  async list(status: string | undefined, page: number, limit: number) {
+  async list(
+    status: string | undefined,
+    page: number,
+    limit: number,
+  ): Promise<{
+    data: AdminClaimListItemDto[];
+    meta: ReturnType<typeof pageMeta>;
+  }> {
     const where: Prisma.BusinessClaimWhereInput = {
-      status: (status?.toUpperCase() as ClaimStatus) ?? ClaimStatus.PENDING,
+      status: status
+        ? (status.toUpperCase() as ClaimStatus)
+        : ClaimStatus.PENDING,
     };
     const [rows, total] = await Promise.all([
       this.prisma.businessClaim.findMany({
@@ -535,10 +562,8 @@ export class ClaimsService {
         orderBy: { createdAt: 'asc' },
         ...skipTake(page, limit),
         include: {
-          business: {
-            select: { id: true, slug: true, name: true, ownershipStatus: true },
-          },
-          claimant: {
+          business: { select: { id: true, slug: true, name: true } },
+          user: {
             select: {
               id: true,
               username: true,
@@ -556,43 +581,33 @@ export class ClaimsService {
         id: c.id,
         status: c.status.toLowerCase(),
         method: c.method.toLowerCase(),
-        verified: !!c.verificationConfirmedAt,
+        verificationConfirmed: !!c.verificationConfirmedAt,
         documentCount: c._count.documents,
-        business: {
-          ...c.business,
-          ownershipStatus: c.business.ownershipStatus.toLowerCase(),
-        },
-        claimant: c.claimant,
+        business: c.business,
+        claimant: c.user,
         createdAt: c.createdAt,
       })),
       meta: pageMeta(page, limit, total),
     };
   }
 
-  /** Full claim for staff. Documents are only exposed (as 10-minute signed URLs) with CLAIM_DOCUMENTS_VIEW. */
-  async detail(actor: AuthUser, id: string) {
+  /** Claim for staff with claim.decide. Document links are 10-minute signed URLs; viewing is audited. */
+  async detail(
+    actor: AuthUser,
+    id: string,
+  ): Promise<{ data: AdminClaimDetailDto }> {
     const claim = await this.prisma.businessClaim.findUnique({
       where: { id },
       include: {
         business: { include: { identifiers: true } },
         documents: true,
-        claimant: {
-          select: {
-            id: true,
-            username: true,
-            displayName: true,
-            email: true,
-            emailVerified: true,
-            createdAt: true,
-          },
+        user: {
+          select: { id: true, username: true, displayName: true, email: true },
         },
       },
     });
     if (!claim) throw new NotFoundException('Claim not found');
-    const canSeeDocs = actor.permissions.includes(
-      AdminPermission.CLAIM_DOCUMENTS_VIEW,
-    );
-    if (canSeeDocs && claim.documents.length) {
+    if (claim.documents.length) {
       await this.audit.record(
         { id: actor.id, role: actor.adminRole ?? undefined },
         {
@@ -603,7 +618,7 @@ export class ClaimsService {
         },
       );
     }
-    const [otherClaims, managers] = await Promise.all([
+    const [otherClaims, members] = await Promise.all([
       this.prisma.businessClaim.findMany({
         where: { businessId: claim.businessId, id: { not: id } },
         select: {
@@ -611,7 +626,7 @@ export class ClaimsService {
           status: true,
           method: true,
           createdAt: true,
-          claimant: { select: { username: true } },
+          user: { select: { username: true } },
         },
         orderBy: { createdAt: 'desc' },
       }),
@@ -636,7 +651,7 @@ export class ClaimsService {
         method: claim.method.toLowerCase(),
         claimantRole: claim.claimantRole,
         message: claim.message,
-        claimant: claim.claimant,
+        claimant: claim.user,
         verification: {
           target: claim.verificationTarget,
           confirmedAt: claim.verificationConfirmedAt,
@@ -654,32 +669,36 @@ export class ClaimsService {
           label: d.label,
           format: d.format,
           createdAt: d.createdAt,
-          viewUrl: canSeeDocs ? this.uploads.privateViewUrl(d.url) : null,
-          restricted: !canSeeDocs,
+          viewUrl: this.uploads.privateViewUrl(d.url),
         })),
         business: {
           id: claim.business.id,
           slug: claim.business.slug,
           name: claim.business.name,
           ownershipStatus: claim.business.ownershipStatus.toLowerCase(),
+          ownershipVerified: claim.business.ownershipVerified,
           identifiers: claim.business.identifiers.map((i) => ({
             type: i.type.toLowerCase(),
             value: i.normalizedValue,
           })),
         },
-        currentManagers: managers.map((m) => m.user),
+        currentMembers: members.map((m) => m.user),
         otherClaims: otherClaims.map((c) => ({
           ...c,
           status: c.status.toLowerCase(),
           method: c.method.toLowerCase(),
         })),
-        decisionNote: claim.decisionNote,
+        decisionReason: claim.decisionReason,
         createdAt: claim.createdAt,
       },
     };
   }
 
-  async approve(actor: AuthUser, id: string, dto: ApproveClaimDto) {
+  async approve(
+    actor: AuthUser,
+    id: string,
+    dto: ApproveClaimDto,
+  ): Promise<{ data: ClaimDecisionDto }> {
     const claim = await this.load(id);
     if (claim.status !== ClaimStatus.PENDING)
       throw new ConflictException('This claim was already decided');
@@ -688,16 +707,16 @@ export class ClaimsService {
       VerificationMethod.WEBSITE_DOMAIN,
     ];
     if (
-      dto.ownership === 'verified' &&
+      dto.ownershipVerified &&
       automated.includes(claim.method) &&
       !claim.verificationConfirmedAt
     ) {
       throw new BadRequestException(
-        'The claimant has not completed email/domain verification. Approve as "claimed" or wait.',
+        'The claimant has not completed email/domain verification. Approve without verification, or wait.',
       );
     }
     if (
-      dto.ownership === 'verified' &&
+      dto.ownershipVerified &&
       claim.method === VerificationMethod.DOCUMENTS &&
       !claim.documents.length
     ) {
@@ -705,37 +724,37 @@ export class ClaimsService {
         'No documents were uploaded for this claim',
       );
     }
-    const managers = await this.prisma.businessMember.findMany({
+    const members = await this.prisma.businessMember.findMany({
       where: {
         businessId: claim.businessId,
         revokedAt: null,
-        userId: { not: claim.claimantId },
+        userId: { not: claim.userId },
       },
     });
-    if (managers.length && !dto.replaceExistingManagers) {
+    if (members.length && !dto.replaceExistingMembers) {
       throw new ConflictException(
-        'Someone else already manages this business. Resend with replaceExistingManagers: true to transfer control.',
+        'Someone else already manages this business. Resend with replaceExistingMembers: true to transfer control.',
       );
     }
-    const ownership =
-      dto.ownership === 'verified'
-        ? OwnershipStatus.VERIFIED
-        : OwnershipStatus.CLAIMED;
-
+    const before = {
+      ownershipStatus: claim.business.ownershipStatus,
+      ownershipVerified: claim.business.ownershipVerified,
+      claimStatus: claim.status,
+    };
     await this.prisma.$transaction(async (tx) => {
       await tx.businessClaim.update({
         where: { id },
         data: {
           status: ClaimStatus.APPROVED,
           pendingKey: null,
-          decisionNote: dto.note,
-          reviewedById: actor.id,
-          reviewedAt: new Date(),
+          decisionReason: dto.reason,
+          decidedById: actor.id,
+          decidedAt: new Date(),
         },
       });
-      if (managers.length) {
+      if (members.length) {
         await tx.businessMember.updateMany({
-          where: { id: { in: managers.map((m) => m.id) } },
+          where: { id: { in: members.map((m) => m.id) } },
           data: { revokedAt: new Date() },
         });
       }
@@ -743,12 +762,12 @@ export class ClaimsService {
         where: {
           businessId_userId: {
             businessId: claim.businessId,
-            userId: claim.claimantId,
+            userId: claim.userId,
           },
         },
         create: {
           businessId: claim.businessId,
-          userId: claim.claimantId,
+          userId: claim.userId,
           role: MemberRole.OWNER,
           claimId: id,
         },
@@ -756,7 +775,10 @@ export class ClaimsService {
       });
       await tx.business.update({
         where: { id: claim.businessId },
-        data: { ownershipStatus: ownership },
+        data: {
+          ownershipStatus: OwnershipStatus.CLAIMED,
+          ownershipVerified: dto.ownershipVerified,
+        },
       });
       await this.audit.record(
         { id: actor.id, role: actor.adminRole ?? undefined },
@@ -764,47 +786,47 @@ export class ClaimsService {
           action: 'claim.approve',
           targetType: 'claim',
           targetId: id,
+          before,
+          after: {
+            ownershipStatus: OwnershipStatus.CLAIMED,
+            ownershipVerified: dto.ownershipVerified,
+            claimStatus: ClaimStatus.APPROVED,
+          },
+          reason: dto.reason,
           metadata: {
             businessId: claim.businessId,
-            claimantId: claim.claimantId,
-            ownership,
-            revokedManagers: managers.map((m) => m.userId),
-            note: dto.note,
+            claimantId: claim.userId,
+            revokedMembers: members.map((m) => m.userId),
           },
         },
         tx,
       );
     });
-
+    void this.revalidate.business(claim.businessId);
     await this.notify.toUser(
-      claim.claimantId,
-      `You now manage ${claim.business.name} on TalkGround`,
+      claim.userId,
+      'claim.decision',
+      `Your claim for ${claim.business.name} was approved`,
       [
-        `Your claim for ${claim.business.name} was approved.`,
-        'You can now update the profile, respond to reviews and see your dashboard.',
+        `Your claim for ${claim.business.name} was approved. You can now manage the profile, respond to reviews and see your dashboard.`,
       ],
-      { label: 'Open your dashboard', path: `/manage/${claim.businessId}` },
+      { label: 'Open your dashboard', path: `/dashboard/${claim.businessId}` },
     );
-    for (const m of managers) {
-      await this.notify.toUser(
-        m.userId,
-        `Your access to ${claim.business.name} changed`,
-        [
-          `TalkGround transferred management of ${claim.business.name} to another representative after reviewing an ownership claim.`,
-          'If you believe this is a mistake, reply to this email.',
-        ],
-      );
-    }
     return {
       data: {
         claimId: id,
         status: 'approved',
-        ownership: ownership.toLowerCase(),
+        ownershipStatus: 'claimed',
+        ownershipVerified: dto.ownershipVerified,
       },
     };
   }
 
-  async reject(actor: AuthUser, id: string, dto: RejectClaimDto) {
+  async reject(
+    actor: AuthUser,
+    id: string,
+    dto: RejectClaimDto,
+  ): Promise<{ data: ClaimDecisionDto }> {
     const claim = await this.load(id);
     if (claim.status !== ClaimStatus.PENDING)
       throw new ConflictException('This claim was already decided');
@@ -814,9 +836,9 @@ export class ClaimsService {
         data: {
           status: ClaimStatus.REJECTED,
           pendingKey: null,
-          decisionNote: dto.note,
-          reviewedById: actor.id,
-          reviewedAt: new Date(),
+          decisionReason: dto.reason,
+          decidedById: actor.id,
+          decidedAt: new Date(),
         },
       });
       await this.releasePendingOwnership(claim.businessId, tx);
@@ -826,54 +848,55 @@ export class ClaimsService {
           action: 'claim.reject',
           targetType: 'claim',
           targetId: id,
-          metadata: { businessId: claim.businessId, note: dto.note },
+          before: { claimStatus: claim.status },
+          after: { claimStatus: ClaimStatus.REJECTED },
+          reason: dto.reason,
+          metadata: { businessId: claim.businessId },
         },
         tx,
       );
     });
     await this.notify.toUser(
-      claim.claimantId,
-      `About your claim for ${claim.business.name}`,
+      claim.userId,
+      'claim.decision',
+      `Your claim for ${claim.business.name} was not approved`,
       [
         `We could not approve your claim for ${claim.business.name}.`,
-        `Reason: ${dto.note}`,
+        `Reason: ${dto.reason}`,
         'You can submit a new claim with more information.',
       ],
+      { label: 'View your claims', path: '/account/claims' },
     );
     return { data: { claimId: id, status: 'rejected' } };
   }
 
-  /** Staff override of ownership (e.g. revoke access, upgrade to verified). */
+  /** Staff override of ownership (revoke access, or confirm verification later). */
   async setOwnership(
     actor: AuthUser,
     businessId: string,
     dto: SetOwnershipDto,
-  ) {
+  ): Promise<{ data: OwnershipChangeDto }> {
     const business = await this.prisma.business.findUnique({
       where: { id: businessId },
     });
     if (!business) throw new NotFoundException('Business not found');
-    const managers = await this.prisma.businessMember.count({
+    const members = await this.prisma.businessMember.count({
       where: { businessId, revokedAt: null },
     });
-    if (dto.status !== 'unclaimed' && !managers) {
+    if (dto.ownershipStatus === 'claimed' && !members)
       throw new BadRequestException(
         'Nobody manages this business. Approve a claim instead.',
       );
-    }
+    if (dto.ownershipStatus === 'unclaimed' && dto.ownershipVerified)
+      throw new BadRequestException(
+        'An unclaimed business cannot be ownership-verified',
+      );
     const next =
-      dto.status === 'verified'
-        ? OwnershipStatus.VERIFIED
-        : dto.status === 'claimed'
-          ? OwnershipStatus.CLAIMED
-          : OwnershipStatus.UNCLAIMED;
-    const revoked = await this.prisma.$transaction(async (tx) => {
-      let revokedUsers: string[] = [];
+      dto.ownershipStatus === 'claimed'
+        ? OwnershipStatus.CLAIMED
+        : OwnershipStatus.UNCLAIMED;
+    await this.prisma.$transaction(async (tx) => {
       if (next === OwnershipStatus.UNCLAIMED) {
-        const active = await tx.businessMember.findMany({
-          where: { businessId, revokedAt: null },
-        });
-        revokedUsers = active.map((m) => m.userId);
         await tx.businessMember.updateMany({
           where: { businessId, revokedAt: null },
           data: { revokedAt: new Date() },
@@ -881,7 +904,10 @@ export class ClaimsService {
       }
       await tx.business.update({
         where: { id: businessId },
-        data: { ownershipStatus: next },
+        data: {
+          ownershipStatus: next,
+          ownershipVerified: dto.ownershipVerified,
+        },
       });
       await this.audit.record(
         { id: actor.id, role: actor.adminRole ?? undefined },
@@ -889,27 +915,26 @@ export class ClaimsService {
           action: 'business.ownership_change',
           targetType: 'business',
           targetId: businessId,
-          metadata: {
-            from: business.ownershipStatus,
-            to: next,
-            note: dto.note,
-            revokedManagers: revokedUsers,
+          before: {
+            ownershipStatus: business.ownershipStatus,
+            ownershipVerified: business.ownershipVerified,
           },
+          after: {
+            ownershipStatus: next,
+            ownershipVerified: dto.ownershipVerified,
+          },
+          reason: dto.reason,
         },
         tx,
       );
-      return revokedUsers;
     });
-    for (const userId of revoked) {
-      await this.notify.toUser(
-        userId,
-        `Your access to ${business.name} was removed`,
-        [
-          `TalkGround removed your management access to ${business.name}.`,
-          `Reason: ${dto.note}`,
-        ],
-      );
-    }
-    return { data: { businessId, ownershipStatus: next.toLowerCase() } };
+    void this.revalidate.business(businessId);
+    return {
+      data: {
+        businessId,
+        ownershipStatus: next.toLowerCase(),
+        ownershipVerified: dto.ownershipVerified,
+      },
+    };
   }
 }

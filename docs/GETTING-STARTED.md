@@ -81,7 +81,7 @@ talkground/
 
 After `npm run prisma:seed`:
 
-- **Admin:** `admin@revyu.ng` / `admin123`
+- **Admin:** the staff account created with `npm run admin:create`
 - **Sample brands:** Nexxa's Kitchen, Jollof Palace, Transcorp Hilton, Skyline Shortlets
 
 ---
@@ -155,7 +155,7 @@ npm run dev
 2. Visit `/brands` — see 4 seeded brands
 3. Visit `/survey` and `/waitlist` — submit test entries
 4. Register a new user at `/register`
-5. Log in as admin: `admin@revyu.ng` / `admin123`
+5. Log in as admin: the staff account created with `npm run admin:create`
 6. Visit `/admin` and `/admin/brands`
 
 ---

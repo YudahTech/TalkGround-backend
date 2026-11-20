@@ -1,30 +1,37 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { BusinessStatus, Prisma, VoteValue } from '@prisma/client';
+import { GoneException, Injectable, NotFoundException } from '@nestjs/common';
+import { BusinessStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import {
-  MIN_REVIEWS_FOR_RATING,
-  PUBLIC_REVIEW_STATUSES,
-} from '../common/rating-rules';
-import { normalizeState, stateName } from '../common/nigeria';
-import { normalizeNigerianPhone } from '../common/identifiers';
+import { VISIBLE_REVIEW_WHERE } from '../common/rating-rules';
 import { pageMeta, skipTake } from '../common/pagination';
+import { normalizeNigerianPhone } from '../common/identifiers';
 import { RatingsService } from './ratings.service';
-import { lifecycleStage, ownershipBadge } from './lifecycle';
+import { SeoService } from './seo.service';
+import { LISTING_DISCLAIMER, ownershipBadge } from './lifecycle';
 import type {
   ReviewListQueryDto,
   SearchBusinessesQueryDto,
 } from './businesses.dto';
+import type {
+  BusinessCardDto,
+  BusinessLocationDto,
+  BusinessNoticeDto,
+  BusinessProfileDto,
+  BusinessRedirectDto,
+  CategoryPageDto,
+} from './businesses.responses';
 import {
   PUBLIC_REVIEW_INCLUDE,
   presentReview,
 } from '../reviews/review-presenter';
 
-const CARD_INCLUDE = {
+export const CARD_INCLUDE = {
   category: { select: { slug: true, name: true } },
-  locations: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
+  city: { select: { slug: true, name: true, state: true } },
 } satisfies Prisma.BusinessInclude;
 
 type CardRow = Prisma.BusinessGetPayload<{ include: typeof CARD_INCLUDE }>;
+
+const RECENT_REVIEWS_ON_PROFILE = 10;
 
 /** Turn free text into a safe prefix tsquery: "kemi clos" → "kemi:* & clos:*". */
 function toPrefixTsQuery(q: string): string | null {
@@ -42,133 +49,112 @@ function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
 }
 
+export function presentLocation(b: {
+  city: { slug: string; name: string; state: string } | null;
+  area: string | null;
+  onlineOnly: boolean;
+}): BusinessLocationDto {
+  const label =
+    b.onlineOnly && !b.city
+      ? 'Online only'
+      : [b.area, b.city?.name].filter(Boolean).join(', ') ||
+        (b.onlineOnly ? 'Online only' : '');
+  return { city: b.city, area: b.area, onlineOnly: b.onlineOnly, label };
+}
+
 @Injectable()
 export class BusinessesService {
   constructor(
     private prisma: PrismaService,
     private ratings: RatingsService,
+    private seo: SeoService,
   ) {}
 
-  presentLocation(l: CardRow['locations'][number]) {
-    return {
-      type: l.type.toLowerCase(),
-      addressLine: l.addressLine,
-      area: l.area,
-      city: l.city,
-      state: l.state,
-      stateName: stateName(l.state),
-      nationwide: l.nationwide,
-      isPrimary: l.isPrimary,
-    };
-  }
-
-  /** Search-result card (PRD §7.2: name, category, location, review count, rating where available). */
-  presentCard(b: CardRow) {
-    const primary = b.locations[0];
+  /** Search-result card (PRD §7.2: name, category, location, review count, rating or insufficient-data). */
+  presentCard(b: CardRow): BusinessCardDto {
     return {
       id: b.id,
       slug: b.slug,
       name: b.name,
       logoUrl: b.logoUrl,
       category: b.category,
-      location: primary
-        ? {
-            area: primary.area,
-            city: primary.city,
-            state: primary.state,
-            stateName: stateName(primary.state),
-            nationwide: primary.nationwide,
-          }
-        : null,
+      location: presentLocation(b),
       rating: this.ratings.compact(b),
-      ownership: ownershipBadge(b.ownershipStatus),
-      underInvestigation: b.underInvestigation,
+      ownership: ownershipBadge(b.ownershipStatus, b.ownershipVerified),
+      path: `/b/${b.slug}`,
     };
   }
 
   /**
-   * Full-text + partial-match search over names, alternative names, handles, websites,
-   * phones, CAC numbers, category and location (PRD §7.2, §13 "PostgreSQL full-text search").
-   * All user input reaches SQL as bound parameters.
+   * Full-text + partial matching over name, alternative names, handles, website, category, city
+   * and area; exact matching for phone numbers through the identifier table (PRD §7.2). Merged
+   * listings are excluded so duplicates never appear twice. All input is bound, never interpolated.
+   * Ownership and verification never influence the order (§7.12).
    */
   async search(query: SearchBusinessesQueryDto) {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const q = (query.q ?? '').trim().slice(0, 100);
-    const tsq = q ? toPrefixTsQuery(q) : null;
-    // A phone typed any common way ("0803 123 4567") matches the stored +234 form.
     const phone = q ? normalizeNigerianPhone(q) : null;
-    const like = q
-      ? `%${escapeLike(phone ?? q.toLowerCase().replace(/^@/, ''))}%`
-      : null;
+    const tsq = q && !phone ? toPrefixTsQuery(q) : null;
+    const like =
+      q && !phone ? `%${escapeLike(q.toLowerCase().replace(/^@/, ''))}%` : null;
+    const lower = q.toLowerCase();
 
     const conditions: Prisma.Sql[] = [Prisma.sql`b.status = 'PUBLISHED'`];
-    if (q) {
+    if (phone) {
+      conditions.push(Prisma.sql`EXISTS (
+        SELECT 1 FROM "BusinessIdentifier" i
+        WHERE i."businessId" = b.id AND i.type = 'PHONE' AND i."normalizedValue" = ${phone})`);
+    } else if (q) {
       conditions.push(Prisma.sql`(
         ${tsq ? Prisma.sql`b."searchVector" @@ to_tsquery('simple', ${tsq}) OR` : Prisma.empty}
         b."searchText" ILIKE ${like}
-        OR word_similarity(${q.toLowerCase()}, b."searchText") > 0.5
+        OR word_similarity(${lower}, b."searchText") > 0.5
       )`);
     }
-    if (query.category) {
-      conditions.push(Prisma.sql`c.slug = ${query.category.toLowerCase()}`);
-    }
-    const state = query.state ? normalizeState(query.state) : null;
-    if (query.state && !state) {
-      return { data: [], meta: pageMeta(page, limit, 0) };
-    }
-    if (state || query.city) {
-      const cityLike = query.city
-        ? `%${escapeLike(query.city.toLowerCase())}%`
-        : null;
-      conditions.push(Prisma.sql`EXISTS (
-        SELECT 1 FROM "BusinessLocation" l WHERE l."businessId" = b.id
-        ${state ? Prisma.sql`AND (l.state = ${state} OR l.nationwide)` : Prisma.empty}
-        ${cityLike ? Prisma.sql`AND (lower(coalesce(l.city,'')) LIKE ${cityLike} OR lower(coalesce(l.area,'')) LIKE ${cityLike})` : Prisma.empty}
-      )`);
-    }
+    if (query.category) conditions.push(Prisma.sql`c.slug = ${query.category}`);
+    if (query.city) conditions.push(Prisma.sql`ci.slug = ${query.city}`);
+    const min = this.ratings.minReviews;
     if (query.minRating) {
-      // PRD §7.2: rating filter only where sufficient review data exists.
+      // §7.2: rating filter only for businesses with enough reviews.
       conditions.push(
-        Prisma.sql`b."reviewCount" >= ${MIN_REVIEWS_FOR_RATING} AND b."ratingAverage" >= ${query.minRating}`,
+        Prisma.sql`b."reviewCount" >= ${min} AND b."ratingAverage" >= ${query.minRating}`,
       );
     }
     const where = Prisma.join(conditions, ' AND ');
 
-    // Never let this collapse to a bare integer: in ORDER BY Postgres reads "0" as a column position.
-    const relevance = q
-      ? Prisma.sql`(
-          ${tsq ? Prisma.sql`ts_rank(b."searchVector", to_tsquery('simple', ${tsq})) * 2 +` : Prisma.empty}
-          similarity(lower(b.name), ${q.toLowerCase()}) * 3 +
-          word_similarity(${q.toLowerCase()}, b."searchText")
-        )`
-      : null;
-    const sufficient = Prisma.sql`(b."reviewCount" >= ${MIN_REVIEWS_FOR_RATING})`;
+    // Never collapse to a bare integer: in ORDER BY Postgres reads "0" as a column position.
+    const relevance =
+      q && !phone
+        ? Prisma.sql`(
+            ${tsq ? Prisma.sql`ts_rank(b."searchVector", to_tsquery('simple', ${tsq})) * 2 +` : Prisma.empty}
+            similarity(lower(b.name), ${lower}) * 3 +
+            word_similarity(${lower}, b."searchText")
+          )`
+        : null;
+    const sufficient = Prisma.sql`(b."reviewCount" >= ${min})`;
     const orderBy =
       query.sort === 'most_reviewed'
-        ? relevance
-          ? Prisma.sql`b."reviewCount" DESC, ${relevance} DESC, b.name ASC`
-          : Prisma.sql`b."reviewCount" DESC, b.name ASC`
+        ? Prisma.sql`b."reviewCount" DESC, b.name ASC`
         : query.sort === 'rating'
           ? Prisma.sql`${sufficient} DESC, b."ratingAverage" DESC NULLS LAST, b."reviewCount" DESC, b.name ASC`
           : relevance
             ? Prisma.sql`${relevance} DESC, b."reviewCount" DESC, b.name ASC`
-            : Prisma.sql`b."reviewCount" DESC, b."publishedAt" DESC NULLS LAST, b.name ASC`;
+            : Prisma.sql`b."reviewCount" DESC, b.name ASC`;
 
     const { skip, take } = skipTake(page, limit);
+    const from = Prisma.sql`FROM "Business" b
+      JOIN "Category" c ON c.id = b."categoryId"
+      LEFT JOIN "City" ci ON ci.id = b."cityId"`;
     const [ids, countRows] = await Promise.all([
-      this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT b.id FROM "Business" b
-        JOIN "BusinessCategory" c ON c.id = b."categoryId"
-        WHERE ${where}
-        ORDER BY ${orderBy}
-        LIMIT ${take} OFFSET ${skip}`,
-      this.prisma.$queryRaw<{ count: bigint }[]>`
-        SELECT count(*)::bigint AS count FROM "Business" b
-        JOIN "BusinessCategory" c ON c.id = b."categoryId"
-        WHERE ${where}`,
+      this.prisma.$queryRaw<
+        { id: string }[]
+      >`SELECT b.id ${from} WHERE ${where} ORDER BY ${orderBy} LIMIT ${take} OFFSET ${skip}`,
+      this.prisma.$queryRaw<
+        { count: bigint }[]
+      >`SELECT count(*)::bigint AS count ${from} WHERE ${where}`,
     ]);
-
     const rows = await this.prisma.business.findMany({
       where: { id: { in: ids.map((r) => r.id) } },
       include: CARD_INCLUDE,
@@ -181,89 +167,115 @@ export class BusinessesService {
   }
 
   /**
-   * Public profile (PRD §7.3, §7.12). A merged listing answers with where it moved to
-   * so old links keep working.
+   * Public profile, server-render ready (PRD §7.3, §7.13). Returns one of:
+   * - kind "profile": the page, with SEO (robots, canonical, title, description, Open Graph, JSON-LD)
+   * - kind "redirect": old slug or merged listing → 301 to the current slug
+   * - kind "suspended": notice page, noindex
+   * Archived → 410. Suggested / pending / rejected → 404.
    */
-  async profile(slug: string) {
+  async profile(slug: string): Promise<{
+    data: BusinessProfileDto | BusinessRedirectDto | BusinessNoticeDto;
+  }> {
     const b = await this.prisma.business.findUnique({
       where: { slug },
       include: {
         ...CARD_INCLUDE,
-        identifiers: {
-          where: { isPublic: true },
-          orderBy: { createdAt: 'asc' },
-        },
-        mergedInto: { select: { slug: true, name: true } },
-        _count: {
-          select: {
-            responses: { where: { status: 'PUBLISHED' } },
-          },
-        },
+        identifiers: { orderBy: { createdAt: 'asc' } },
+        mergedInto: { select: { slug: true, status: true } },
+        _count: { select: { responses: { where: { status: 'PUBLISHED' } } } },
       },
     });
-    if (!b) throw new NotFoundException('Business not found');
+    if (!b) {
+      const history = await this.prisma.businessSlugHistory.findUnique({
+        where: { oldSlug: slug },
+        include: { business: { select: { slug: true } } },
+      });
+      if (history)
+        return { data: this.redirect('slug_changed', history.business.slug) };
+      throw new NotFoundException('Business not found');
+    }
     if (b.status === BusinessStatus.MERGED && b.mergedInto) {
+      return { data: this.redirect('merged', b.mergedInto.slug) };
+    }
+    if (b.status === BusinessStatus.ARCHIVED)
+      throw new GoneException('This business is no longer listed');
+    if (b.status === BusinessStatus.SUSPENDED) {
       return {
         data: {
-          merged: true,
-          mergedInto: b.mergedInto,
-          message: `This listing was merged into ${b.mergedInto.name}.`,
+          kind: 'suspended',
+          slug: b.slug,
+          name: b.name,
+          notice: 'This business profile is temporarily unavailable.',
+          robots: 'noindex,follow',
         },
       };
     }
-    if (b.status !== BusinessStatus.PUBLISHED) {
+    if (b.status !== BusinessStatus.PUBLISHED)
       throw new NotFoundException('Business not found');
-    }
 
     const [dimensions, recent] = await Promise.all([
       this.ratings.dimensionBreakdown(b.id, b.categoryId),
       this.prisma.review.findMany({
-        where: { businessId: b.id, status: { in: PUBLIC_REVIEW_STATUSES } },
+        where: { businessId: b.id, ...VISIBLE_REVIEW_WHERE },
         orderBy: { createdAt: 'desc' },
-        take: 5,
+        take: RECENT_REVIEWS_ON_PROFILE,
         include: PUBLIC_REVIEW_INCLUDE,
       }),
     ]);
-
-    const social = b.identifiers.filter((i) =>
-      ['INSTAGRAM', 'TIKTOK', 'FACEBOOK', 'X', 'WHATSAPP'].includes(i.type),
-    );
+    const rating = { ...this.ratings.summary(b), dimensions };
+    const recentReviews = recent.map((r) => presentReview(r));
+    const location = presentLocation(b);
     return {
       data: {
+        kind: 'profile',
         id: b.id,
         slug: b.slug,
         name: b.name,
         description: b.description,
         logoUrl: b.logoUrl,
         category: b.category,
-        website: b.website,
-        publicContact: { email: b.publicEmail, phone: b.publicPhone },
-        socialLinks: social.map((i) => ({
+        location,
+        identifiers: b.identifiers.map((i) => ({
           type: i.type.toLowerCase(),
-          handle: i.normalizedValue,
           value: i.value,
+          normalizedValue: i.normalizedValue,
+          verified: i.verified,
         })),
-        alternativeNames: b.identifiers
-          .filter((i) => i.type === 'ALTERNATIVE_NAME')
-          .map((i) => i.value),
-        locations: b.locations.map((l) => this.presentLocation(l)),
-        rating: { ...this.ratings.summary(b), dimensions },
-        ownership: ownershipBadge(b.ownershipStatus),
-        lifecycleStage: lifecycleStage(b),
-        underInvestigation: b.underInvestigation
-          ? {
-              label: 'Under investigation',
-              note:
-                b.investigationNote ??
-                'TalkGround is reviewing activity on this profile.',
-            }
-          : null,
+        publicContact: {
+          website: b.website,
+          email: b.publicEmail,
+          phone: b.publicPhone,
+        },
+        rating,
+        ownership: ownershipBadge(b.ownershipStatus, b.ownershipVerified),
+        status: b.status.toLowerCase(),
         responseCount: b._count.responses,
-        recentReviews: recent.map((r) => presentReview(r)),
-        disclaimer:
-          'A listing on TalkGround is not an endorsement. Ratings come only from customer reviews.',
+        recentReviews,
+        disclaimer: LISTING_DISCLAIMER,
         publishedAt: b.publishedAt,
+        seo: this.seo.businessSeo({
+          business: { ...b, identifierCount: b.identifiers.length },
+          categoryName: b.category.name,
+          locationLabel: location.label,
+          city: b.city,
+          area: b.area,
+          rating,
+          visibleReviews: recentReviews,
+        }),
       },
+    };
+  }
+
+  private redirect(
+    reason: 'slug_changed' | 'merged',
+    slug: string,
+  ): BusinessRedirectDto {
+    return {
+      kind: 'redirect',
+      reason,
+      slug,
+      location: `/b/${slug}`,
+      statusCode: 301,
     };
   }
 
@@ -272,16 +284,16 @@ export class BusinessesService {
       where: { slug },
       select: { id: true, status: true },
     });
-    if (!b || b.status !== BusinessStatus.PUBLISHED) {
+    if (!b || b.status !== BusinessStatus.PUBLISHED)
       throw new NotFoundException('Business not found');
-    }
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
     const where: Prisma.ReviewWhereInput = {
       businessId: b.id,
-      status: { in: PUBLIC_REVIEW_STATUSES },
+      ...VISIBLE_REVIEW_WHERE,
       ...(query.stars ? { overallRating: query.stars } : {}),
     };
+    // §7.9: helpful votes affect review ordering only.
     const orderBy: Prisma.ReviewOrderByWithRelationInput[] =
       query.sort === 'helpful'
         ? [{ helpfulVotes: { _count: 'desc' } }, { createdAt: 'desc' }]
@@ -290,7 +302,6 @@ export class BusinessesService {
           : query.sort === 'rating_low'
             ? [{ overallRating: 'asc' }, { createdAt: 'desc' }]
             : [{ createdAt: 'desc' }];
-
     const [rows, total] = await Promise.all([
       this.prisma.review.findMany({
         where,
@@ -300,19 +311,68 @@ export class BusinessesService {
       }),
       this.prisma.review.count({ where }),
     ]);
-    const votes = viewerId
-      ? await this.prisma.helpfulVote.findMany({
-          where: { userId: viewerId, reviewId: { in: rows.map((r) => r.id) } },
-          select: { reviewId: true, value: true },
-        })
-      : [];
-    const voteBy = new Map<string, VoteValue>(
-      votes.map((v) => [v.reviewId, v.value]),
-    );
+    const voted = viewerId
+      ? new Set(
+          (
+            await this.prisma.helpfulVote.findMany({
+              where: {
+                userId: viewerId,
+                reviewId: { in: rows.map((r) => r.id) },
+              },
+              select: { reviewId: true },
+            })
+          ).map((v) => v.reviewId),
+        )
+      : null;
     return {
       data: rows.map((r) =>
-        presentReview(r, { myVote: voteBy.get(r.id) ?? null }),
+        presentReview(r, { helpfulByMe: voted ? voted.has(r.id) : null }),
       ),
+      meta: pageMeta(page, limit, total),
+    };
+  }
+
+  /** Category page and category-in-city page data (PRD §7.13 /c/{category}[/{city}]). */
+  async categoryPage(
+    categorySlug: string,
+    citySlug: string | undefined,
+    page: number,
+    limit: number,
+  ): Promise<{ data: CategoryPageDto; meta: ReturnType<typeof pageMeta> }> {
+    const category = await this.prisma.category.findUnique({
+      where: { slug: categorySlug },
+    });
+    if (!category || !category.active)
+      throw new NotFoundException('Category not found');
+    const city = citySlug
+      ? await this.prisma.city.findUnique({ where: { slug: citySlug } })
+      : null;
+    if (citySlug && (!city || !city.active))
+      throw new NotFoundException('City not found');
+    const where: Prisma.BusinessWhereInput = {
+      status: BusinessStatus.PUBLISHED,
+      categoryId: category.id,
+      ...(city ? { cityId: city.id } : {}),
+    };
+    const [total, rows] = await Promise.all([
+      this.prisma.business.count({ where }),
+      this.prisma.business.findMany({
+        where,
+        orderBy: [{ reviewCount: 'desc' }, { name: 'asc' }],
+        ...skipTake(page, limit),
+        include: CARD_INCLUDE,
+      }),
+    ]);
+    return {
+      data: {
+        category: { slug: category.slug, name: category.name },
+        city: city
+          ? { slug: city.slug, name: city.name, state: city.state }
+          : null,
+        total,
+        businesses: rows.map((r) => this.presentCard(r)),
+        seo: this.seo.categoryPageSeo(category, city, total),
+      },
       meta: pageMeta(page, limit, total),
     };
   }

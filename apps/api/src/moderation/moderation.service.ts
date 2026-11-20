@@ -6,7 +6,7 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service';
+import { AuditService, AuditTarget } from '../audit/audit.service';
 import type { AuthUser } from '../common/current-user.decorator';
 
 type Db = Prisma.TransactionClient | PrismaService;
@@ -19,12 +19,21 @@ export interface ModerationRecord {
   note?: string | null;
   reportId?: string | null;
   disputeId?: string | null;
+  before?: Record<string, unknown> | null;
+  after?: Record<string, unknown> | null;
   metadata?: Record<string, unknown>;
 }
 
+const AUDIT_TARGET: Record<ModerationTarget, AuditTarget> = {
+  REVIEW: 'review',
+  BUSINESS_RESPONSE: 'review',
+  BUSINESS: 'business',
+  USER: 'user',
+};
+
 /**
- * PRD §12 ModerationAction + §8.5 audit: every moderation decision is stored with its policy
- * ground, and mirrored into the audit log.
+ * PRD §13 ModerationAction + §8.5 audit: every moderation decision is stored with its recorded
+ * reason and mirrored into the audit log (with before/after values).
  */
 @Injectable()
 export class ModerationService {
@@ -50,11 +59,12 @@ export class ModerationService {
       { id: actor.id, role: actor.adminRole ?? undefined },
       {
         action: `moderation.${entry.targetType.toLowerCase()}.${entry.action.toLowerCase()}`,
-        targetType: entry.targetType.toLowerCase(),
+        targetType: AUDIT_TARGET[entry.targetType],
         targetId: entry.targetId,
+        before: entry.before ?? null,
+        after: entry.after ?? null,
+        reason: [entry.reason, entry.note].filter(Boolean).join(': ') || null,
         metadata: {
-          reason: entry.reason ?? null,
-          note: entry.note ?? null,
           reportId: entry.reportId ?? null,
           disputeId: entry.disputeId ?? null,
           ...entry.metadata,

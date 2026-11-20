@@ -67,7 +67,7 @@ Cloudinary is set up correctly.
 1. Render dashboard → the TalkGround API service → **Environment**.
 2. Add `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY` and `CLOUDINARY_API_SECRET` with the same values.
 3. **Save Changes**. Render redeploys automatically.
-4. Check: `POST https://revyu-backend.onrender.com/api/v1/uploads/signature` (logged in, body
+4. Check: `POST https://<staging-api-host>/api/v1/uploads/signature` (logged in, body
    `{"folder":"reviews"}`) returns `200` with `cloudName`, not `503 Cloudinary is not configured`.
 
 ## 4. Recommended Cloudinary settings

@@ -9,14 +9,18 @@ import {
   IsString,
   IsUrl,
   IsUUID,
+  Matches,
   MaxLength,
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { IdentifierInputDto } from '../businesses/businesses.dto';
+import {
+  IdentifierInputDto,
+  LocationFieldsDto,
+} from '../businesses/businesses.dto';
 import { PaginationQueryDto } from '../common/pagination';
 
-export class CreateSubmissionDto {
+export class CreateSubmissionDto extends LocationFieldsDto {
   @ApiProperty({ example: 'Mama Put Kitchen' })
   @IsString()
   @MinLength(2)
@@ -24,10 +28,10 @@ export class CreateSubmissionDto {
   name: string;
 
   @ApiProperty({
-    example: 'food-restaurants',
+    example: 'food-and-restaurants',
     description: 'Category slug (GET /categories)',
   })
-  @IsString()
+  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
   @MaxLength(60)
   category: string;
 
@@ -45,34 +49,9 @@ export class CreateSubmissionDto {
   @MaxLength(300)
   website?: string;
 
-  @ApiPropertyOptional({ example: 'lagos' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(60)
-  state?: string;
-
-  @ApiPropertyOptional({ example: 'Lagos' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  city?: string;
-
-  @ApiPropertyOptional({ example: 'Yaba' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(100)
-  area?: string;
-
-  @ApiPropertyOptional({ example: '3 Herbert Macaulay Way' })
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  addressLine?: string;
-
   @ApiPropertyOptional({
     type: [IdentifierInputDto],
-    description:
-      'Instagram/TikTok handles, phone, etc. Helps us avoid duplicates.',
+    description: 'Instagram/TikTok handles, phone… helps spot duplicates.',
   })
   @IsOptional()
   @IsArray()
@@ -102,6 +81,7 @@ export class CreateSubmissionDto {
 export class SubmissionListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
     enum: ['pending_review', 'approved', 'rejected', 'merged'],
+    default: 'pending_review',
   })
   @IsOptional()
   @IsIn(['pending_review', 'approved', 'rejected', 'merged'])
@@ -118,9 +98,18 @@ export class ApproveSubmissionDto {
 
   @ApiPropertyOptional({ description: 'Override the submitted category slug' })
   @IsOptional()
-  @IsString()
+  @Matches(/^[a-z0-9]+(-[a-z0-9]+)*$/)
   @MaxLength(60)
   category?: string;
+
+  @ApiPropertyOptional({
+    description:
+      'Factual description written from supplied or verified information (PRD §7.13). Overrides the submitted one.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(2000)
+  description?: string;
 
   @ApiPropertyOptional({
     default: true,

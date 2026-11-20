@@ -1,21 +1,17 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
-  IsEnum,
   IsIn,
   IsOptional,
   IsString,
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { ReportReason } from '@prisma/client';
 import { PaginationQueryDto } from '../common/pagination';
-import { toUpperCase } from '../common/transforms';
 
 export class ResponseBodyDto {
   @ApiProperty({
     example:
-      "Thank you for the feedback, Ada. We're sorry the delivery was late — our dispatch partner had issues that week. We've since switched couriers.",
+      "Thank you for the feedback, Ada. We're sorry the delivery was late — our dispatch partner had issues that week, and we've since switched couriers.",
     minLength: 10,
     maxLength: 3000,
   })
@@ -27,8 +23,7 @@ export class ResponseBodyDto {
 
 export class ProposeResolutionDto {
   @ApiProperty({
-    example:
-      'We sent a replacement dress on 12 Nov and offered a full refund of the delivery fee.',
+    example: 'We sent a replacement on 12 Nov and refunded the delivery fee.',
     maxLength: 500,
   })
   @IsString()
@@ -38,21 +33,18 @@ export class ProposeResolutionDto {
 }
 
 export class CreateDisputeDto {
-  @ApiProperty({ enum: ReportReason, example: ReportReason.FALSE_EXPERIENCE })
-  @Transform(toUpperCase)
-  @IsEnum(ReportReason)
-  reason: ReportReason;
-
   @ApiProperty({
     example:
       'We have no order from this customer: no matching name, phone number or payment in our records for October.',
     minLength: 30,
     maxLength: 3000,
+    description:
+      'Written reason (PRD §8.4). Staff assess it against the review and the available evidence.',
   })
   @IsString()
   @MinLength(30)
   @MaxLength(3000)
-  details: string;
+  reason: string;
 }
 
 export class PortalReviewQueryDto extends PaginationQueryDto {
@@ -60,7 +52,7 @@ export class PortalReviewQueryDto extends PaginationQueryDto {
     enum: ['all', 'unanswered', 'complaints', 'unresolved'],
     default: 'all',
     description:
-      'complaints = 1–2 stars; unresolved = complaints not reported resolved by the reviewer',
+      'complaints = 1–2 stars; unresolved = complaints the reviewer has not marked resolved',
   })
   @IsOptional()
   @IsIn(['all', 'unanswered', 'complaints', 'unresolved'])

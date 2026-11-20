@@ -18,11 +18,11 @@ import { toUpperCase } from '../common/transforms';
 export class CreateClaimDto {
   @ApiProperty({
     enum: VerificationMethod,
-    example: VerificationMethod.BUSINESS_EMAIL,
+    example: VerificationMethod.SOCIAL_ACCOUNT,
     description:
-      'BUSINESS_EMAIL: an address on the business website domain, or its listed public email. ' +
-      'WEBSITE_DOMAIN: add a DNS TXT record. SOCIAL_ACCOUNT: put a code in the bio of the listed social account. ' +
-      'DOCUMENTS: upload CAC certificate or similar (private). MANUAL_REVIEW: explain and staff will contact you.',
+      'BUSINESS_EMAIL: an address on the business website domain, or its listed email. WEBSITE_DOMAIN: add a DNS TXT record. ' +
+      'SOCIAL_ACCOUNT: put a code in the bio of the listed Instagram/TikTok/Facebook/X account (works for Instagram-only vendors). ' +
+      'DOCUMENTS: upload supporting documents (private). MANUAL_REVIEW: explain, and staff will contact you.',
   })
   @Transform(toUpperCase)
   @IsEnum(VerificationMethod)
@@ -35,9 +35,9 @@ export class CreateClaimDto {
   claimantRole: string;
 
   @ApiPropertyOptional({
-    example: 'kemi@kemiscloset.ng',
+    example: '@mamaput_lagos',
     description:
-      'BUSINESS_EMAIL: the email address. WEBSITE_DOMAIN: the domain (e.g. kemiscloset.ng). SOCIAL_ACCOUNT: the handle (e.g. @kemis_closet).',
+      'BUSINESS_EMAIL: the email. WEBSITE_DOMAIN: the domain. SOCIAL_ACCOUNT: the listed handle.',
   })
   @IsOptional()
   @IsString()
@@ -45,7 +45,7 @@ export class CreateClaimDto {
   verificationTarget?: string;
 
   @ApiPropertyOptional({
-    example: 'I founded the business in 2019. Reach me on 0801 234 5678.',
+    example: 'I started the business in 2019. Call me on 0801 234 5678.',
     maxLength: 1000,
   })
   @IsOptional()
@@ -80,31 +80,31 @@ export class AddClaimDocumentDto {
 
 export class ClaimListQueryDto extends PaginationQueryDto {
   @ApiPropertyOptional({
-    enum: ['pending', 'approved', 'rejected', 'cancelled'],
+    enum: ['pending', 'approved', 'rejected'],
     default: 'pending',
   })
   @IsOptional()
-  @IsIn(['pending', 'approved', 'rejected', 'cancelled'])
-  status?: 'pending' | 'approved' | 'rejected' | 'cancelled';
+  @IsIn(['pending', 'approved', 'rejected'])
+  status?: 'pending' | 'approved' | 'rejected';
 }
 
 export class ApproveClaimDto {
   @ApiProperty({
-    enum: ['claimed', 'verified'],
+    example: true,
     description:
-      'claimed = the claimant may manage the profile; verified = control of the business was actually proven (shows "Ownership verified").',
+      'true only when the evidence was actually checked (code/DNS confirmed, documents examined, bio code seen). Sets business.ownershipVerified.',
   })
-  @IsIn(['claimed', 'verified'])
-  ownership: 'claimed' | 'verified';
+  @IsBoolean()
+  ownershipVerified: boolean;
 
   @ApiProperty({
     example:
-      'Confirmed code sent to kemi@kemiscloset.ng and CAC certificate RC123456.',
+      'Saw code TG-1A2B3C4D in the @mamaput_lagos Instagram bio on 21 Nov.',
   })
   @IsString()
   @MinLength(5)
   @MaxLength(1000)
-  note: string;
+  reason: string;
 
   @ApiPropertyOptional({
     default: false,
@@ -113,25 +113,32 @@ export class ApproveClaimDto {
   })
   @IsOptional()
   @IsBoolean()
-  replaceExistingManagers?: boolean;
+  replaceExistingMembers?: boolean;
 }
 
 export class RejectClaimDto {
-  @ApiProperty({ example: 'The documents do not show this business name.' })
+  @ApiProperty({
+    example: 'The documents do not show this business name.',
+    description: 'Shown to the claimant',
+  })
   @IsString()
   @MinLength(5)
   @MaxLength(1000)
-  note: string;
+  reason: string;
 }
 
 export class SetOwnershipDto {
-  @ApiProperty({ enum: ['unclaimed', 'claimed', 'verified'] })
-  @IsIn(['unclaimed', 'claimed', 'verified'])
-  status: 'unclaimed' | 'claimed' | 'verified';
+  @ApiProperty({ enum: ['unclaimed', 'claimed'] })
+  @IsIn(['unclaimed', 'claimed'])
+  ownershipStatus: 'unclaimed' | 'claimed';
+
+  @ApiProperty({ example: false })
+  @IsBoolean()
+  ownershipVerified: boolean;
 
   @ApiProperty({ example: 'Owner asked us to remove their access.' })
   @IsString()
   @MinLength(5)
   @MaxLength(1000)
-  note: string;
+  reason: string;
 }

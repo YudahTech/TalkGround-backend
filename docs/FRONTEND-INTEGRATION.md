@@ -1,317 +1,361 @@
-# TalkGround — Frontend Integration Guide (API v2.0)
+# TalkGround — Frontend Integration Guide (API 2.5)
 
-**Audience:** frontend developers · **Last updated:** 20 November 2026 · **API version:** 2.0
-**Base URL (live):** `https://revyu-backend.onrender.com/api/v1` · **Local:** `http://localhost:3001/api/v1`
-**Swagger:** https://revyu-backend.onrender.com/docs (every request/response schema, with examples)
+**Audience:** frontend developers · **Last updated:** 21 November 2026 · **Matches:** PRD v2.5 (final MVP spec)
+**Base URL:** staging `https://<staging-api-host>/api/v1` (sent to you privately) · local `http://localhost:3001/api/v1`
+**Swagger:** `https://<staging-api-host>/docs` — every request **and response** schema, with examples
 
-> **Read first:** [FRONTEND-AUTH.md](./FRONTEND-AUTH.md) — sessions are HttpOnly cookies. Send every request with
-> `credentials: 'include'`; there are no tokens and no `Authorization` header.
+Read first: [FRONTEND-AUTH.md](./FRONTEND-AUTH.md). Sessions are HttpOnly cookies: send every browser request
+with `credentials: 'include'`. There are no tokens and no `Authorization` header. Access cookies last 15 minutes;
+the auth guide's API client refreshes them automatically.
 
-> **v2.0 is a breaking release.** TalkGround is now a general business-reputation platform (PRD), not a
-> restaurants/hotels app. `/brands`, `/home`, `/brand-suggestions` and the `rating`/`trustScore` fields are gone.
-> See §1 for the mapping.
+> Test accounts for staging are shared privately. They are never written in docs or in Swagger (PRD §15).
 
 ---
 
-## 1. What changed from v1
+## 1. What changed from API 2.0
 
-| v1 | v2 |
-|---|---|
-| `GET /home`, `GET /brands`, `GET /brands/filters` | `GET /businesses` (search + filters), `GET /categories`, `GET /locations` |
-| `GET /brands/:slug`, `/brands/:slug/reviews` | `GET /businesses/:slug`, `GET /businesses/:slug/reviews` |
-| `GET /brands/:slug/context` | Gone. `POST /reviews` returns `409` with `reviewId` when you already reviewed; `GET /users/me/reviews` lists yours |
-| Categories RESTAURANTS/HOTELS, cities LAGOS/ABUJA (enums) | 6 categories from `GET /categories` (more can be added without a release); all 37 states from `GET /locations` |
-| Review: `rating`, `title`, `body`, `pros`, `cons`, `recommend` | Review: `overallRating`, **`dimensions`** (per category), `title?`, `body`, `experienceDate?` |
-| `trustScore`, `trustLabel`, `claimed` | **Removed** (PRD: no unexplained trust score). Use `rating` and `ownership` blocks |
-| `POST /reviews/:id/helpful` (toggle) | `PUT /reviews/:id/vote {helpful: true|false}`, `DELETE /reviews/:id/vote` |
-| `POST /reviews/:id/report` | `POST /reviews/:id/reports` (new reasons) |
-| `POST /reviews/:id/media` | `POST /reviews/:id/evidence` (new kinds + upload folders) |
-| `POST /brand-suggestions` | `POST /business-submissions` |
-| `user.role`, `user.city`, `user.interests` | `user.isStaff`, `user.staffRole`, `user.permissions`, `user.location` |
-| Phone verification required to review | Only a **verified email** is required |
-| Admin `role: ADMIN/MODERATOR` | Staff roles with fine-grained permissions (`user.permissions`) |
-
-New in v2: business owners (claims, dashboard, official responses, resolution, disputes, share links), rating
-dimensions, evidence labels, duplicate merging, full admin/moderation suite.
+| Area | 2.0 | 2.5 |
+|---|---|---|
+| Public URLs | not specified | **`/b/{slug}`**, **`/c/{category}`**, **`/c/{category}/{city}`**, server-rendered (§3) |
+| Locations | free-text state/city, `GET /locations` | **City records**: `GET /cities`; a business has `location: { city, area, onlineOnly, label }`; filter `?city=lagos` |
+| Category slugs | `food-restaurants` … | `food-and-restaurants`, `fashion-and-clothing`, `beauty-skincare-and-hair`, `electronics-and-gadgets`, `logistics-and-delivery`, `general-consumer-services` |
+| Rating dimensions | 5 generic | Per category (e.g. food: Food quality, Hygiene and safety, Service, Delivery, Value for money). Always read them from `GET /categories/:slug` |
+| Minimum reviews for a star rating | 5 | **3** (`GET /meta/config`); message is exactly **"Not enough reviews yet"** |
+| Review body | `{ rating dims as { key, score } }` | `dimensions: [{ key, value }]`, **`title` required (3–120)**, body **≥ 50** chars, optional `recommend` |
+| Repeat review | `newExperience: true` after 90 days | **One active review per business.** A repeat experience = `PATCH` the existing review |
+| Delete review | `DELETE` = withdraw | `DELETE` = soft delete (hidden, kept for moderation) |
+| Labels | `labels[]` only | Separate fields: `reviewer.emailVerified`, `evidenceAttached`, `evidenceStatus`, `underInvestigation`; ownership `ownershipVerified` (plus a ready `labels[]` for display) |
+| Votes | `PUT /vote {helpful}` / `DELETE` | **`POST /reviews/:id/helpful`** toggles; `helpfulByMe` |
+| Report reasons | 7 codes | `fake_or_never_visited`, `spam_or_promotional`, `personal_info`, `harassment_or_abuse`, `conflict_of_interest`, `paid_or_incentivised`, `impersonation`, `other` — field **`reasonCode`** + `note` |
+| Business responses | "Official response from X" | **"Response from X"**; edits unlimited and versioned; responses can be reported |
+| Ownership badge | `ownership.status` = unclaimed / claimed / ownership_verified | `ownership.status` = unclaimed / claimed **+ `ownership.ownershipVerified`** |
+| Disputes | reason enum + details | **written `reason`** (≥ 30 chars); flags the review "under investigation" |
+| Owner area | `/manage/businesses/:id/*` | same paths; dashboard field names changed (§5.6) |
+| Evidence | photo / receipt / screenshot / document | **photo** (public, folder `evidence`) / **receipt** (private, folder `receipts`) |
+| Errors | `{ code, message }` | + **`details`** when useful (e.g. `details.reviewId`, `details.duplicateCandidates`) |
+| Duplicates on suggest | 409 "already listed" | **201** + `possibleMatches` ("Is it one of these?") — duplicates are signals for staff, never rejections |
 
 ---
 
 ## 2. Conventions
 
-- **Envelope:** `{ "data": ... }`; lists add `"meta": { page, limit, total, totalPages }`. Pagination: `?page=1&limit=20` (max 50).
-- **Errors:** `{ "error": { "code": "BAD_REQUEST", "message": "..." } }`. Show `error.message` — it is written for users.
-- **Enums:** responses are **lowercase** (`"published"`, `"business_email"`). Requests accept any case.
-- **Unknown fields are rejected** with `400` (strict validation). Send only documented fields.
-- **IDs** are UUIDs; public pages use **slugs** (`/businesses/kemi-s-closet`).
-- **Text** is stored as plain text. Render it as text, never as HTML.
+- Success: `{ "data": ... }`; lists add `"meta": { page, limit, total, totalPages }` (`?page=1&limit=20`, max 50).
+- Error: `{ "error": { "code", "message", "details"? } }`. `message` is written for users — show it.
+- Enum values in responses are **lowercase** (`"published"`, `"business_email"`); requests accept any case.
+- Unknown request fields are rejected with `400`. Send only documented fields.
+- Text is plain text. Render it as text, never as HTML.
+- `GET /meta/config` gives the limits the UI should mirror (minimum reviews, body length, cache time…).
 
-| Status | Meaning | What to do |
+| Status | Meaning | Do |
 |---|---|---|
-| 400 | Validation failed / rule broken | Show `error.message` |
-| 401 | Not signed in / session expired | Refresh once (see auth guide), then go to login |
-| 403 | Not allowed (e.g. email not verified, not the owner, staff permission missing) | Show `error.message`; for "Verify your email" send to verification |
-| 404 | Not found (also: unpublished/suspended businesses) | Empty state |
-| 409 | Conflict: duplicate review/claim/report/response, existing business | Show message; many 409s include a link target (below) |
-| 429 | Rate limited / account locked | Show message, retry later |
-| 503 | Uploads not configured (Cloudinary) | Hide upload UI |
-
-**409s that carry data:**
-- `POST /reviews` → `{ message, reviewId }` — send the user to edit their existing review.
-- `POST /business-submissions` → `{ message, business: { slug, name } }` — "This business is already listed".
+| 400 | Invalid input / rule broken | Show `error.message` |
+| 401 | Not signed in / session expired | Refresh once (auth guide), then login |
+| 403 | Not allowed (permission, membership, unverified email, cross-site origin) | Show message |
+| 404 | Not found or not public | 404 page |
+| 409 | Conflict (already reviewed, duplicate claim/report/dispute, possible duplicate listing) | Use `error.details` |
+| 410 | Business archived | 410 page (see §3) |
+| 429 | Rate limited / login locked | Show message, retry later |
+| 503 | Uploads not configured | Hide upload UI |
 
 ---
 
-## 3. Core concepts the UI must get right
+## 3. Public pages: server rendering, URLs and SEO (PRD §7.13)
 
-### 3.1 Categories and rating dimensions
+**Required by the PRD:** home, category, category-in-city and business pages are **server-rendered** (Next.js server
+components or equivalent). Their full content — name, description, rating, reviews, responses — must be in the HTML
+with JavaScript disabled. Fetch public endpoints **from the server without cookies**. Only user-specific bits
+(`helpfulByMe`, "write a review" state, dashboard links) load client-side after the page.
 
-`GET /categories` returns each category with its `ratingDimensions` (`key`, `name`, `description`, `required`).
-**Build the review form from this list** — never hard-code dimensions. Required dimensions must be sent;
-optional ones (e.g. Delivery for restaurants) may be skipped ("Not applicable").
+### 3.1 URL scheme
 
-Current categories: `fashion-clothing`, `beauty-skincare-hair`, `electronics-gadgets`, `food-restaurants`,
-`logistics-delivery`, `general-services`.
+| Page | URL | Data |
+|---|---|---|
+| Business | `/b/{slug}` | `GET /businesses/{slug}` (+ `GET /businesses/{slug}/reviews?page=` for more reviews) |
+| Category | `/c/{category}` | `GET /categories/{category}/businesses?page=` |
+| Category in a city | `/c/{category}/{city}` | `GET /categories/{category}/businesses?city={city}&page=` |
+| Write review (neutral invite link) | `/b/{slug}/review` | business profile + `GET /categories/{category}` |
 
-### 3.2 Ratings (PRD §7.12)
+### 3.2 Business page: handle every response kind
 
-Every business carries a `rating` block:
+`GET /businesses/{slug}` returns `data.kind`:
+
+| `data.kind` / status | Do |
+|---|---|
+| `"profile"` | Render the page. Use `data.seo` for the head (below). |
+| `"redirect"` | Send **HTTP 301** to `data.location` (old slug after a rename, or a merged listing). |
+| `"suspended"` | Render a short notice page with `<meta name="robots" content="noindex,follow">`. |
+| HTTP `410` | Archived: return 410 (or 404). |
+| HTTP `404` | Not public (suggested, pending, rejected) or unknown. |
+
+### 3.3 `data.seo` → `<head>`
+
+```tsx
+// app/b/[slug]/page.tsx (Next.js App Router)
+export async function generateMetadata({ params }) {
+  const { data } = await getBusiness(params.slug); // server fetch, no cookies
+  if (data.kind !== 'profile') return {};
+  const s = data.seo;
+  return {
+    title: s.title,
+    description: s.description,
+    alternates: { canonical: s.canonicalUrl },
+    robots: s.robots,                       // "index,follow" or "noindex,follow"
+    openGraph: { ...s.openGraph, images: s.openGraph.image ? [s.openGraph.image] : [] },
+    twitter: { card: 'summary', title: s.openGraph.title, description: s.description },
+  };
+}
+// In the page body:
+<script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(data.seo.jsonLd) }} />
+```
+
+Rules the backend already enforces in `data.seo` — do not override them:
+- `robots` follows the PRD indexable rule (published, description ≥ 80 chars, a city or "online only", at least one
+  identifier, not force-noindexed by a moderator). Claim and verification status never affect it.
+- `jsonLd.aggregateRating` is present **only** when a star rating is displayed, with the same numbers as the page.
+  Review markup covers only published reviews shown on the page. Don't add markup the visitor can't see.
+- Titles and descriptions never say "verified" or "trusted". Keep `data.disclaimer` visible on the page:
+  *"A public listing does not mean TalkGround endorses or has verified this business."*
+- With zero reviews, the page must say there are no reviews yet (`rating.reviewCount === 0`) and show no stars.
+
+Category pages: `data.seo` from `/categories/{category}/businesses` (indexable only with ≥ 5 published businesses).
+
+### 3.4 Sitemap and robots.txt
+
+- `GET /seo/sitemap` → `[{ type, path, url, lastModified }]` — **only indexable URLs**. Render it as `/sitemap.xml`.
+- `robots.txt` must reference the sitemap and **block** the API, admin, dashboard and account paths, for example:
+
+```
+User-agent: *
+Disallow: /api/
+Disallow: /admin
+Disallow: /dashboard
+Disallow: /account
+Sitemap: https://<site>/sitemap.xml
+```
+
+- **Staging must not be indexed**: serve `Disallow: /` (and `X-Robots-Tag: noindex`) on every non-production host.
+
+### 3.5 Freshness (removed content must disappear within 15 minutes)
+
+- Public API responses carry `Cache-Control: s-maxage=900` (PUBLIC_CACHE_MAX_MINUTES). Use ISR/`revalidate` ≤ 900 s.
+- **On-demand revalidation (preferred):** give the backend team a revalidation endpoint. The API will
+  `POST FRONTEND_REVALIDATE_URL` with `{ "paths": ["/b/slug", "/c/category", ...] }` and header
+  `X-TalkGround-Signature: sha256=<HMAC-SHA256 of the raw body with REVALIDATE_SECRET>`. Verify the signature, then
+  call `revalidatePath` for each path. It fires when reviews, responses, listings or accounts change.
+
+---
+
+## 4. Concepts the UI must get exactly right
+
+### 4.1 Categories and dimensions
+Build the review form from `GET /categories/{slug}` → `ratingDimensions[]` (`key`, `label`, `description`,
+`required`, `order`). Required → must be rated; optional → offer "Not applicable". Overall rating is always required.
+Hotels and accommodation exists but is inactive (not a launch category) and is not returned.
+
+### 4.2 Ratings (PRD §7.12)
 
 ```json
-{
-  "reviewCount": 2,
-  "average": null,
-  "sufficientData": false,
-  "message": "Not enough reviews for a reliable rating yet (2 of 5 needed)",
-  "minimumReviews": 5,
-  "distribution": [{ "stars": 5, "count": 1, "percent": 50 }, ...],
-  "dimensions": [{ "key": "communication", "name": "Communication", "reviewCount": 2, "average": null, "sufficientData": false }]
+"rating": {
+  "reviewCount": 2, "average": null, "sufficientData": false,
+  "message": "Not enough reviews yet", "minimumReviews": 3,
+  "distribution": [{ "stars": 5, "count": 1, "percent": 50 }, …],
+  "dimensions": [{ "key": "delivery", "label": "Delivery", "reviewCount": 2, "average": null, "sufficientData": false }]
 }
 ```
 
-Rules for the UI:
-- **Always show `reviewCount` next to any rating.**
-- When `sufficientData` is `false`, `average` is `null` — show `message` instead of stars.
-- Never compute your own average. Link "How ratings work" to `GET /meta/rating-methodology` (versioned rules).
-- There are no rankings or "top rated" lists in the MVP (PRD). `sort=rating` on search is fine.
+- Always show `reviewCount` next to any rating. When `average` is `null`, show `message` instead of stars.
+- Always show the 1–5 distribution counts. Never compute your own average.
+- No leaderboards or "top rated" lists (PRD: no public rankings). A user-chosen `sort=rating` on search is fine.
+- Link "How ratings work" to `GET /meta/rating-methodology`.
 
-### 3.3 Review labels — show them exactly
+### 4.3 The five labels are separate facts (PRD §6.4)
 
-Each review has `labels: [{ key, label, description }]`. Possible keys:
-
-| key | label | meaning |
+| Show | Field | Meaning (use this wording) |
 |---|---|---|
-| `account_verified` | Account verified | Reviewer confirmed their email. **Not** proof of purchase. |
-| `evidence_attached` | Evidence attached | Reviewer attached evidence; TalkGround has **not** examined it. |
-| `evidence_reviewed` | Evidence reviewed | A moderator examined the evidence. |
-| `under_investigation` | Under investigation | TalkGround is looking into this review (still visible). |
+| Account verified | `review.reviewer.emailVerified` | The reviewer's email is verified. **Not** proof of purchase. |
+| Evidence attached | `review.evidenceAttached` (and `evidenceStatus` ≠ `accepted`) | Uploaded, not yet looked at by staff. |
+| Evidence reviewed | `review.evidenceStatus === 'accepted'` | A moderator examined the evidence. |
+| Under investigation | `review.underInvestigation` | The review has an open report or dispute. It stays visible. |
+| Ownership verified | `business.ownership.ownershipVerified` | Staff confirmed the claimant controls the profile. Not an endorsement. |
 
-The PRD requires these never be merged into one "verified" badge. Use the provided `label` + `description`
-(tooltip) verbatim. `earlierExperience: true` marks an older review superseded by the same person's newer one.
+`review.labels[]` already contains `{ key, label, description }` for the first four in display order — use them,
+or build from the fields; never merge them into one "verified" badge, and never write "verified purchase".
 
-### 3.4 Ownership badge
+### 4.4 Ownership
+`ownership = { status: 'unclaimed' | 'claimed', ownershipVerified, label, description }`. A pending claim is shown
+as unclaimed. Show `description` in a tooltip.
 
-`ownership: { status, label, description }` where status is `unclaimed`, `claimed` or `ownership_verified`.
-Show the `description` — ownership confirms control of the profile, **not** business quality.
-`underInvestigation` on a business (object with `label`, `note`) must be shown prominently on the profile.
-
-### 3.5 Business responses and resolution
-
-- `review.response` (or `null`): `{ body, label: "Official response from X", representative: { displayName, role }, createdAt, edited }`.
-  Show it under the review, clearly marked as the business's official response.
-- `review.resolution: { status, label }` — `none`, `business_responded`, `resolution_proposed`,
-  `resolved_by_consumer`, `dispute_reopened`. Only the **reviewer** can mark `resolved`/`reopened`
-  (`POST /reviews/:id/resolution`); a business can only propose. Resolution never changes the rating.
+### 4.5 Responses and resolution
+- `review.response` → `{ body, label: "Response from <business>", representative: { displayName }, createdAt, edited }`.
+  Show it beside the review.
+- `review.resolution = { status, label }`: `none`, `business_responded`, `resolution_proposed`,
+  `resolved_by_consumer`, `reopened`. Only the reviewer can mark `resolved`/`reopened`. Never affects the rating.
+- `GET /reviews/{id}` adds `resolutionHistory[]`.
 
 ---
 
-## 4. Screens → endpoints
+## 5. Screens → endpoints
 
-### 4.1 Discover (no account needed)
+### 5.1 Discover (no account)
 
 | UI | Call |
 |---|---|
-| Search box / results | `GET /businesses?q=&category=&state=&city=&minRating=&sort=relevance|most_reviewed|rating&page=` |
+| Search | `GET /businesses?q=&category=&city=&minRating=&sort=relevance|most_reviewed|rating&page=` |
 | Category chips | `GET /categories` |
-| State filter | `GET /locations` (37 states with counts; slug e.g. `lagos`, `fct`) |
-| Business profile | `GET /businesses/:slug` (includes 5 recent reviews) |
-| All reviews | `GET /businesses/:slug/reviews?sort=recent|helpful|rating_high|rating_low&stars=1..5` |
-| One review (share page) | `GET /reviews/:id` (adds `resolutionHistory`) |
-| Reviewer profile | `GET /users/:username` |
+| City filter | `GET /cities` |
+| Business page | §3 |
+| Reviewer profile | `GET /users/{username}` |
 
-`q` matches names, alternative names, social handles (`@kemis_closet` or `kemis_closet`), websites
-(`kemiscloset.ng`), phone numbers in any format, CAC numbers, category and location. Partial words work.
+`q` matches name, alternative names, `@handles`, website domain, category, city and area (partial words), and a
+**phone number exactly** (any format: `0803 123 4567`, `+234…`). Searching `@mamaput_lagos` returns the business.
 
-If `GET /businesses/:slug` returns `{ data: { merged: true, mergedInto: { slug } } }`, redirect to the new slug.
-
-### 4.2 Write a review (signed in + verified email)
-
-1. `GET /categories/:slug` → dimensions for the business's category.
-2. `POST /reviews`:
+### 5.2 Write / update a review (signed in, verified email)
 
 ```json
+POST /reviews
 {
   "businessId": "uuid",
   "overallRating": 4,
-  "dimensions": [
-    { "key": "product_service_quality", "score": 5 },
-    { "key": "value_for_money", "score": 4 }
-  ],
-  "title": "Great fabric, slow delivery",
-  "body": "At least 30 characters describing the experience...",
-  "experienceDate": "2026-11-02"
+  "dimensions": [{ "key": "food_quality", "value": 5 }, { "key": "value_for_money", "value": 4 }],
+  "title": "Great food, slow delivery",
+  "body": "At least 50 characters describing the experience…",
+  "recommend": true
 }
 ```
 
-3. Response `data.moderation` is a message when the review was held for a quick check (status `pending_moderation`,
-   visible only to the author); otherwise `null` and the review is live.
-4. Optional evidence: upload (§5), then `POST /reviews/:id/evidence { kind, url }`.
+- `data.moderation` is a message when the review is held for a quick check (status `pending`, visible only to the
+  author). Otherwise the review is live.
+- Already reviewed → `409` with `error.details.reviewId` → open the edit form: `PATCH /reviews/{id}` (a repeat
+  experience is an update; history is kept; the page shows "Edited" + `editedAt`).
+- `DELETE /reviews/{id}` deletes (soft). `GET /users/me/reviews` lists every status.
+- Max 3 new reviews / 24 h. Business members cannot review their own business.
 
-Rules: one current review per business (`409` + `reviewId` → offer "Edit your review"). After 90 days the person
-may review a new experience with `newExperience: true`. Max 3 new reviews / 24h. Business representatives cannot
-review their own business.
-
-My reviews: `GET /users/me/reviews` (all statuses, `editsRemaining`). Edit: `PATCH /reviews/:id` (max 5 edits,
-history at `GET /reviews/:id/revisions`). Withdraw: `DELETE /reviews/:id`.
-
-### 4.3 Interact with reviews (signed in)
+### 5.3 Interactions
 
 | Action | Call |
 |---|---|
-| Helpful / not helpful | `PUT /reviews/:id/vote { "helpful": true }` → `{ myVote, helpfulCount }` |
-| Remove vote | `DELETE /reviews/:id/vote` |
-| Report | `POST /reviews/:id/reports { reason, details? }` — reasons: `false_experience`, `spam_promotional`, `personal_information`, `harassment_abuse`, `conflict_of_interest`, `impersonation`, `other_policy_violation` |
-| Reviewer: resolved / reopened | `POST /reviews/:id/resolution { status: "resolved" | "reopened", note? }` |
+| Helpful toggle | `POST /reviews/{id}/helpful` → `{ helpful, helpfulCount }` |
+| Report review | `POST /reviews/{id}/reports { reasonCode, note? }` |
+| Report a business response | `POST /reviews/{id}/response/reports { reasonCode, note? }` |
+| Reviewer: resolved / reopened | `POST /reviews/{id}/resolution { status: "resolved" | "reopened", note? }` |
+| Evidence | upload (§6) then `POST /reviews/{id}/evidence { type: "photo" | "receipt", url }`; remove `DELETE /reviews/{id}/evidence/{evidenceId}` |
 
-`myVote` comes back on review lists when signed in.
+### 5.4 Suggest a business
 
-### 4.4 Suggest a business (journey 9.3)
+`POST /business-submissions { name, category, city | onlineOnly, area?, description?, website?, identifiers?, isOwner?, ownerRole? }`
+→ `201` with `possibleMatches[]` — show "Is it one of these?" with links. Staff approve, reject or merge.
+Status: `GET /users/me/business-submissions` (`adminNote` holds the reason after a decision).
 
-Search first. Then `POST /business-submissions`:
+Identifier types: `instagram`, `tiktok`, `facebook`, `x`, `website`, `phone`, `email`, `alt_name`, `other`.
 
-```json
-{ "name": "Mama Put Kitchen", "category": "food-restaurants", "state": "lagos", "city": "Lagos", "area": "Yaba",
-  "identifiers": [{ "type": "instagram", "value": "@mamaputkitchen" }], "isOwner": false }
-```
+### 5.5 Claim a business
 
-`isOwner: true` + `ownerRole` for owners submitting their own business. Nothing is public until staff approve.
-Response includes `possibleMatches` (listings that look similar) — show "Is it one of these?".
-Status list: `GET /users/me/business-submissions`.
+`POST /businesses/{id}/claims { method, claimantRole, verificationTarget?, message? }`
 
-Identifier types: `instagram`, `tiktok`, `facebook`, `x`, `whatsapp`, `website`, `phone`, `email`,
-`alternative_name`, `cac_number`, `other`.
-
-### 4.5 Claim a business (journey 9.4)
-
-`POST /businesses/:businessId/claims { method, claimantRole, verificationTarget?, message? }`
-
-| method | `verificationTarget` | What the user does next |
+| method | `verificationTarget` | Next step |
 |---|---|---|
-| `business_email` | email on the business website domain, or its listed public email | Enter the 6-digit code: `POST /claims/:id/verify-email { code }` (`POST /claims/:id/resend-code`) |
-| `website_domain` | listed website domain | Add the TXT record from `instructions.dnsRecord`, then `POST /claims/:id/check-domain` |
-| `social_account` | listed handle, e.g. `@kemis_closet` | Put `instructions.code` in the account bio; staff check it |
-| `documents` | — | Upload to folder `claim-documents`, then `POST /claims/:id/documents { label, url }` |
-| `manual_review` | — | `message` required; staff contact them |
+| `social_account` | listed handle, e.g. `@mamaput_lagos` | Put `data.instructions.code` in the bio; staff check it. **Use this for Instagram-only vendors.** |
+| `business_email` | email on the website domain, or the listed email | `POST /claims/{id}/verify-email { code }` (`/resend-code`) |
+| `website_domain` | listed domain | Add `instructions.dnsRecord`, then `POST /claims/{id}/check-domain` |
+| `documents` | — | Upload to folder `claim-documents`, then `POST /claims/{id}/documents { label, url }` |
+| `manual_review` | — | `message` required |
 
-Show `data.instructions.summary` after creating. `GET /users/me/claims` / `GET /claims/:id` for status,
-`DELETE /claims/:id` to cancel. Staff approve every claim; approval adds the business to `GET /users/me/businesses`.
+Show `data.instructions.summary`. Status: `GET /users/me/claims`, `GET /claims/{id}` (`decisionReason` on
+rejection). On approval the business appears in `GET /users/me/businesses`.
 
-### 4.6 Business portal (owners)
-
-Every route is `/manage/businesses/:businessId/...` and returns `403` unless the user manages that business.
+### 5.6 Business dashboard (members only) — `/manage/businesses/{businessId}/…`
 
 | UI | Call |
 |---|---|
-| "My businesses" switcher | `GET /users/me/businesses` |
-| Dashboard | `GET /manage/businesses/:id/dashboard` → `overview` (rating, distribution, dimensions), `responseActivity`, `unresolvedComplaints`, `trends.monthly` (6 months), `reportedIssues`, `recentReviews`, `shareLinks` |
-| Edit profile | `GET` / `PATCH /manage/businesses/:id` (description, logoUrl, website, publicEmail, publicPhone, locations). Name/category are staff-only (`lockedFields`) |
-| Public links | `POST /manage/businesses/:id/identifiers { type, value }`, `DELETE .../identifiers/:identifierId` |
-| Reviews inbox | `GET /manage/businesses/:id/reviews?filter=all|unanswered|complaints|unresolved` (`canRespond`, `canEditResponse`, `hasOpenDispute`) |
-| Respond | `POST /manage/businesses/:id/reviews/:reviewId/response { body }`; edit with `PATCH` (max 3 edits) |
-| Propose resolution | `POST /manage/businesses/:id/reviews/:reviewId/resolution { note }` |
-| Dispute a review | `POST /manage/businesses/:id/reviews/:reviewId/disputes { reason, details }` (details ≥ 30 chars) |
-| Reports & disputes status | `GET /manage/businesses/:id/issues` |
-| Share | `GET /manage/businesses/:id/share-links` → `profileUrl`, `reviewUrl`, `suggestedMessage`, `whatsappShareUrl`, `policy` |
+| Business switcher | `GET /users/me/businesses` |
+| Overview | `GET …/dashboard` → `rating` (+ distribution, dimensions), `publishedReviewCount`, `responseActivity { responded, unanswered, responseRate, averageResponseHours }`, `unresolvedComplaints`, `trend[]` (6 months), `issues`, `recentReviews`, `shareLinks` |
+| Edit profile | `GET` / `PATCH …` (description, logoUrl, website, publicEmail, publicPhone, city, area, onlineOnly). `indexingChecklist` says what blocks search indexing. Name/category are staff-only. |
+| Public links | `POST …/identifiers { type, value }` → `alsoUsedBy` (other listings sharing it); `DELETE …/identifiers/{id}` |
+| Reviews inbox | `GET …/reviews?filter=all|unanswered|complaints|unresolved` (`canRespond`, `canEditResponse`, `canDispute`, `disputeStatus`) |
+| Respond / edit | `POST` / `PATCH …/reviews/{reviewId}/response { body }` |
+| Propose resolution | `POST …/reviews/{reviewId}/resolution { note }` |
+| Dispute | `POST …/reviews/{reviewId}/disputes { reason }` |
+| Report a review | `POST /reviews/{reviewId}/reports` (members can report) |
+| Reports & disputes | `GET …/issues` |
+| Share | `GET …/share-links` → `profileUrl`, `reviewUrl`, `suggestedMessage`, `whatsappShareUrl`, `badge { text, url, html }`, `policy` |
 
-Share/invite UI must stay neutral (PRD §7.11): show `policy` text, never "leave us 5 stars".
-`reviewUrl` is `FRONTEND_URL/businesses/:slug/review` — the frontend should route it to the write-review screen.
+Keep the dashboard simple (no decorative charts). Share/invite wording must stay neutral: show `policy`.
 
-### 4.7 Account
+### 5.7 Account
 
 | UI | Call |
 |---|---|
-| Profile | `GET /users/me`, `PATCH /users/me { displayName?, bio?, avatarUrl?, location? }` |
-| Verify email | `POST /auth/verify-email/send-code`, `POST /auth/verify-email/confirm { otp }` |
-| Password | `POST /auth/change-password`, `POST /auth/forgot-password`, `POST /auth/reset-password` |
-| Download my data | `GET /users/me/export` |
-| Delete account | `DELETE /users/me { password }` |
+| Profile | `GET` / `PATCH /users/me { displayName?, bio?, avatarUrl?, location? }` |
+| Email verification | `POST /auth/verify-email/send-code`, `POST /auth/verify-email/confirm { otp }` |
+| Passwords | `POST /auth/change-password`, `/auth/forgot-password`, `/auth/reset-password` |
+| Data export / delete | `GET /users/me/export`, `DELETE /users/me { password }` |
 
-Show `location` publicly only if set; never ask for a home address.
+Phone verification is off by default (`requirePhoneVerifiedForReviews` in `/meta/config`).
 
-### 4.8 Staff console (only if `user.isStaff`)
+### 5.8 Staff console (only when `user.isStaff`)
 
-Show each section only when `user.permissions` includes the permission.
+Permissions are PRD §9 keys in `user.permissions`. Show a section only when the permission is present.
 
 | Section | Permission | Calls |
 |---|---|---|
 | Overview & queues | any staff | `GET /admin/dashboard` |
-| Users | `USERS_VIEW` / `USERS_RESTRICT` / `STAFF_MANAGE` | `GET /admin/users`, `GET /admin/users/:id`, `PATCH /admin/users/:id/suspension`, `GET /admin/roles`, `PATCH /admin/users/:id/staff-role` |
-| Listings | `BUSINESSES_MANAGE` (+ `BUSINESSES_MERGE`) | `GET/POST /admin/businesses`, `GET/PATCH /admin/businesses/:id`, `/status`, `/investigation`, `/identifiers`, `/duplicates`, `GET /admin/businesses/duplicates`, `POST /admin/businesses/:id/merge` |
-| Submissions | `SUBMISSIONS_REVIEW` | `GET /admin/submissions`, `GET /admin/submissions/:id`, `POST .../approve|reject|merge` |
-| Claims | `CLAIMS_REVIEW` (+ `CLAIM_DOCUMENTS_VIEW` for files) | `GET /admin/claims`, `GET /admin/claims/:id`, `POST .../approve|reject`, `PATCH /admin/businesses/:id/ownership` |
-| Review moderation | `REVIEWS_MODERATE` (+ `EVIDENCE_REVIEW`) | `GET /admin/reviews?queue=pending_moderation|under_investigation|reported|evidence|removed`, `GET /admin/reviews/:id`, `POST /admin/reviews/:id/moderation`, `PATCH /admin/evidence/:id`, `POST /admin/responses/:id/remove` |
-| Reports | `REPORTS_MANAGE` | `GET /admin/reports`, `PATCH /admin/reports/:id` |
-| Disputes | `DISPUTES_MANAGE` | `GET /admin/disputes`, `GET/PATCH /admin/disputes/:id` |
-| Categories & dimensions | `TAXONOMY_MANAGE` | `GET /admin/taxonomy`, `POST/PATCH /admin/categories`, `POST/PATCH /admin/dimensions` |
-| Audit log | `AUDIT_VIEW` | `GET /admin/audit-logs?action=&targetType=&targetId=` |
+| Review moderation | `review.moderate` | `GET /admin/reviews?queue=pending|under_investigation|reported|evidence|suspended|removed`, `GET /admin/reviews/{id}`, `POST /admin/reviews/{id}/moderation { action, reason, note }`, `PATCH /admin/reviews/{id}/content`, `POST /admin/responses/{id}/remove`, `PATCH /admin/businesses/{id}/noindex` |
+| Evidence | `evidence.review` | `PATCH /admin/reviews/{id}/evidence-status { status: accepted|rejected, reason }` |
+| Reports | `report.resolve` | `GET /admin/reports`, `PATCH /admin/reports/{id} { decision: dismiss|suspend|remove|investigate, reason }` |
+| Suggestions | `suggestion.resolve` | `GET /admin/submissions`, `GET /admin/submissions/{id}`, `POST …/approve|reject|merge` |
+| Claims | `claim.decide` | `GET /admin/claims`, `GET /admin/claims/{id}`, `POST …/approve { ownershipVerified, reason }`, `POST …/reject { reason }`, `PATCH /admin/businesses/{id}/ownership` |
+| Listings | `business.create` / `business.edit` / `business.suspend` / `business.merge` | `POST /admin/businesses`, `GET/PATCH /admin/businesses/{id}`, `PATCH …/status` (shows `allowedTransitions`), identifiers, `GET /admin/businesses/duplicates`, `POST …/merge` |
+| Disputes | `dispute.decide` | `GET /admin/disputes`, `GET /admin/disputes/{id}`, `POST …/start-review`, `PATCH /admin/disputes/{id} { decision: upheld|review_actioned|closed, reviewAction?, reason, note }` |
+| Users | `user.suspend` | `GET /admin/users`, `GET /admin/users/{id}`, `PATCH …/suspension`, `GET /admin/emails`, `POST /admin/emails/{id}/retry` |
+| Categories, dimensions, cities | `category.manage` | `GET /admin/taxonomy`, `POST/PATCH /admin/categories`, `/admin/dimensions`, `/admin/cities` |
+| Roles & audit | `role.assign`, `auditlog.export` | `GET /admin/roles`, `PATCH /admin/users/{id}/staff-role { roleKey, reason }`, `GET /admin/audit-logs`, `GET /admin/audit-logs/export` (CSV) |
 
-Every moderation decision needs a policy `reason` (`spam`, `fabricated_review`, `harassment`, `threats`,
-`hate_speech`, `impersonation`, `personal_information`, `manipulated_ratings`, `fake_evidence`,
-`conflict_of_interest`, `defamatory_or_unlawful`, `no_violation`, `other`). Removal cannot use `no_violation`.
+Moderation decisions need a policy `reason` (`spam`, `fabricated_review`, `harassment`, `threats`, `hate_speech`,
+`impersonation`, `personal_information`, `rating_manipulation`, `fake_evidence`, `conflict_of_interest`,
+`defamatory_content`, `legal_complaint`, `no_violation`, `other`). Suspending/removing cannot use `no_violation`.
+Dispute decision `upheld` means **the review stays**.
 
 ---
 
-## 5. Uploads (Cloudinary, direct from the browser)
+## 6. Uploads (Cloudinary, browser → Cloudinary directly)
 
 1. `POST /uploads/signature { folder }` → `{ uploadUrl, apiKey, signature, params, maxBytes, allowedFormats }`.
-2. `POST` multipart to `uploadUrl` with the file plus `api_key`, `signature` and **every key in `params`**.
-   This request goes to Cloudinary: **no `credentials: 'include'`**.
-3. Send the returned `secure_url` to the API.
+2. `POST` multipart to `uploadUrl` with the file, `api_key`, `signature` and **every key in `params`** —
+   no `credentials: 'include'` on this request (it goes to Cloudinary).
+3. Send `secure_url` to the API.
 
-| folder | visibility | used by |
+| folder | visibility | for |
 |---|---|---|
-| `evidence` | public | review photos (`kind: photo`) |
-| `evidence-private` | private | `receipt`, `screenshot`, `document` evidence |
-| `logos` | public | `logoUrl` on a business |
-| `avatars` | public | `avatarUrl` on a user |
-| `claim-documents` | private | claim documents |
+| `evidence` | public | review photos |
+| `receipts` | private | review receipts (never shown publicly) |
+| `logos` | public | business logo |
+| `avatars` | public | user avatar |
+| `claim-documents` | private | claim evidence |
 
-Max 5 MB, jpg/jpeg/png/webp. Private files are never returned to the browser after upload. If uploads return
-`503`, Cloudinary isn't configured yet — hide upload UI; text reviews work.
+Max 5 MB; jpg, jpeg, png, webp. `503` = uploads not configured yet → hide the upload UI.
 
 ---
 
-## 6. Demo accounts (seeded)
+## 7. Launch checklist owned by the frontend (PRD §19)
 
-| Role | Email | Password |
-|---|---|---|
-| Super admin | `admin@revyu.ng` | `admin123` |
-| Moderator | `moderator@example.com` | `demo1234` |
-| Consumer | `chinedu.okafor@gmail.com` | `demo1234` |
-| Business owner (Kemi's Closet, ownership verified) | `owner@example.com` | `demo1234` |
-| Consumers | `reviewer1@example.com` … `reviewer6@example.com` | `demo1234` |
-
-18 fictional demo businesses across the 6 categories. Examples: `kemi-s-closet` (6 reviews, rated, owned, has a
-response), `gadget-hub-ikeja` (5 reviews, mixed), `adire-lane` (2 reviews → insufficient data),
-`threadline-menswear` (no reviews).
+- [ ] Public business, category and city pages render their full content with JavaScript disabled
+- [ ] `/b/{slug}` pages; `redirect` kind → 301; `suspended` → noindex notice; 410 for archived
+- [ ] `<head>` from `data.seo` (title, description, canonical, robots, Open Graph, Twitter) — WhatsApp preview checked
+- [ ] JSON-LD from `data.seo.jsonLd` embedded as-is
+- [ ] `/sitemap.xml` from `GET /seo/sitemap`; `robots.txt` blocks `/api`, `/admin`, `/dashboard`, `/account`
+- [ ] Staging blocks all indexing
+- [ ] Revalidation ≤ 15 minutes (or the on-demand webhook)
+- [ ] Every browser call uses `credentials: 'include'`; no tokens stored
+- [ ] Single canonical host, HTTP → HTTPS; one registrable domain shared with the API; tested on Safari and iPhone
+- [ ] Privacy policy, terms and moderation policy pages published
+- [ ] Labels shown as separate facts; no "verified purchase" wording anywhere
 
 ---
 
-## 7. Types
-
-Generate TypeScript types from the live spec:
+## 8. Types
 
 ```bash
-npx openapi-typescript https://revyu-backend.onrender.com/docs/openapi.json -o src/lib/api-schema.ts
+npx openapi-typescript https://<staging-api-host>/docs/openapi.json -o src/lib/api-schema.ts
 ```
 
-Related: [FRONTEND-AUTH.md](./FRONTEND-AUTH.md) · [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md)
+Related: [FRONTEND-AUTH.md](./FRONTEND-AUTH.md) · [API-CHANGELOG-v2.5.md](./API-CHANGELOG-v2.5.md)

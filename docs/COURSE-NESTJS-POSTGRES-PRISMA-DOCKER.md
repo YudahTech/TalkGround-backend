@@ -113,7 +113,7 @@ A **relational database** — data lives in tables with rows and columns, connec
 CREATE DATABASE talkground;
 
 -- Basic queries
-SELECT * FROM "User" WHERE email = 'admin@revyu.ng';
+SELECT * FROM "User" WHERE email = 'the staff account created with `npm run admin:create`';
 SELECT * FROM "Brand" WHERE city = 'LAGOS' AND status = 'ACTIVE';
 
 -- Join (reviews with brand names)
@@ -247,7 +247,7 @@ export class PrismaService extends PrismaClient implements OnModuleInit {
 ```typescript
 // Find one
 const user = await this.prisma.user.findUnique({
-  where: { email: 'admin@revyu.ng' },
+  where: { email: 'the staff account created with `npm run admin:create`' },
 });
 
 // Find many with filter
@@ -274,7 +274,7 @@ await this.prisma.review.update({
 
 // Upsert (create or update)
 await this.prisma.user.upsert({
-  where: { email: 'admin@revyu.ng' },
+  where: { email: 'the staff account created with `npm run admin:create`' },
   update: {},
   create: { email: '...', passwordHash: '...', ... },
 });

@@ -1,5 +1,4 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
-import type { AdminPermission } from '@prisma/client';
 
 /** The authenticated caller, as loaded fresh from the database on every request. */
 export interface AuthUser {
@@ -10,8 +9,10 @@ export interface AuthUser {
   emailVerified: boolean;
   phoneVerified: boolean;
   isStaff: boolean;
+  /** Staff role key: moderator | admin | super_admin, or null. */
   adminRole: string | null;
-  permissions: AdminPermission[];
+  /** PRD §9 permission keys, e.g. "review.moderate". */
+  permissions: string[];
 }
 
 export const CurrentUser = createParamDecorator(

@@ -4,7 +4,6 @@ import {
   ArrayMaxSize,
   IsArray,
   IsBoolean,
-  IsDateString,
   IsEnum,
   IsIn,
   IsInt,
@@ -18,15 +17,13 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
-import { EvidenceKind, ReportReason } from '@prisma/client';
+import { EvidenceType, ReportReason } from '@prisma/client';
 import { PaginationQueryDto } from '../common/pagination';
+import { toUpperCase } from '../common/transforms';
 
-const upper = ({ value }: { value: unknown }) =>
-  typeof value === 'string' ? value.toUpperCase() : value;
-
-export class DimensionScoreDto {
+export class DimensionValueDto {
   @ApiProperty({
-    example: 'communication',
+    example: 'delivery',
     description: 'Dimension key from GET /categories/:slug',
   })
   @IsString()
@@ -37,68 +34,64 @@ export class DimensionScoreDto {
   @IsInt()
   @Min(1)
   @Max(5)
-  score: number;
+  value: number;
 }
 
 export class CreateReviewDto {
-  @ApiProperty({ example: '7a1c2c1e-2a0b-4a7d-9a43-8a1f1f7a9b10' })
+  @ApiProperty()
   @IsUUID()
   businessId: string;
 
-  @ApiProperty({ example: 4, minimum: 1, maximum: 5 })
+  @ApiProperty({
+    example: 4,
+    minimum: 1,
+    maximum: 5,
+    description: 'Always required',
+  })
   @IsInt()
   @Min(1)
   @Max(5)
   overallRating: number;
 
   @ApiPropertyOptional({
-    type: [DimensionScoreDto],
+    type: [DimensionValueDto],
     description:
-      "Scores for the category's rating dimensions. Required dimensions must be included; optional ones may be skipped.",
+      "The category's dimensions: required ones must be rated; optional ones may be skipped.",
   })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
   @ValidateNested({ each: true })
-  @Type(() => DimensionScoreDto)
-  dimensions?: DimensionScoreDto[];
+  @Type(() => DimensionValueDto)
+  dimensions?: DimensionValueDto[];
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     example: 'Great fabric, slow delivery',
+    minLength: 3,
     maxLength: 120,
   })
-  @IsOptional()
   @IsString()
+  @MinLength(3)
   @MaxLength(120)
-  title?: string;
+  title: string;
 
   @ApiProperty({
     example:
-      'Ordered two dresses on Instagram. The fabric quality was excellent but delivery took 9 days instead of 3. They kept me updated on WhatsApp.',
-    minLength: 30,
-    maxLength: 5000,
+      'Ordered two dresses on Instagram. The fabric quality was excellent but delivery took 9 days instead of 3. They kept me updated on WhatsApp throughout.',
+    description:
+      'Between REVIEW_BODY_MIN_LENGTH (default 50, see GET /meta/config) and 5000 characters',
   })
   @IsString()
-  @MinLength(30)
   @MaxLength(5000)
   body: string;
 
   @ApiPropertyOptional({
-    example: '2026-11-02',
-    description: 'When the experience happened',
-  })
-  @IsOptional()
-  @IsDateString({ strict: true })
-  experienceDate?: string;
-
-  @ApiPropertyOptional({
-    default: false,
-    description:
-      'Set to true to review a NEW experience with a business you already reviewed (allowed after the repeat period). Your earlier review stays visible as an earlier experience.',
+    example: true,
+    description: 'Would you recommend this business?',
   })
   @IsOptional()
   @IsBoolean()
-  newExperience?: boolean;
+  recommend?: boolean;
 }
 
 export class UpdateReviewDto {
@@ -110,86 +103,79 @@ export class UpdateReviewDto {
   overallRating?: number;
 
   @ApiPropertyOptional({
-    type: [DimensionScoreDto],
-    description: 'Replaces all dimension scores',
+    type: [DimensionValueDto],
+    description: 'Replaces all dimension ratings',
   })
   @IsOptional()
   @IsArray()
   @ArrayMaxSize(10)
   @ValidateNested({ each: true })
-  @Type(() => DimensionScoreDto)
-  dimensions?: DimensionScoreDto[];
+  @Type(() => DimensionValueDto)
+  dimensions?: DimensionValueDto[];
 
-  @ApiPropertyOptional({ maxLength: 120 })
+  @ApiPropertyOptional({ minLength: 3, maxLength: 120 })
   @IsOptional()
   @IsString()
+  @MinLength(3)
   @MaxLength(120)
   title?: string;
 
-  @ApiPropertyOptional({ minLength: 30, maxLength: 5000 })
+  @ApiPropertyOptional({ maxLength: 5000 })
   @IsOptional()
   @IsString()
-  @MinLength(30)
   @MaxLength(5000)
   body?: string;
 
-  @ApiPropertyOptional({ example: '2026-11-02' })
+  @ApiPropertyOptional()
   @IsOptional()
-  @IsDateString({ strict: true })
-  experienceDate?: string;
+  @IsBoolean()
+  recommend?: boolean;
 }
 
 export class AddEvidenceDto {
   @ApiProperty({
-    enum: EvidenceKind,
-    example: EvidenceKind.RECEIPT,
+    enum: EvidenceType,
+    example: EvidenceType.RECEIPT,
     description:
-      'PHOTO is public (upload to folder "evidence"). RECEIPT, SCREENSHOT and DOCUMENT are private (folder "evidence-private").',
+      'PHOTO is public (upload folder "evidence"). RECEIPT is private (upload folder "receipts").',
   })
-  @Transform(upper)
-  @IsEnum(EvidenceKind)
-  kind: EvidenceKind;
+  @Transform(toUpperCase)
+  @IsEnum(EvidenceType)
+  type: EvidenceType;
 
   @ApiProperty({
     example:
-      'https://res.cloudinary.com/demo/image/authenticated/v1/talkground/evidence-private/abc.jpg',
+      'https://res.cloudinary.com/demo/image/authenticated/v1/talkground/receipts/abc.jpg',
   })
   @IsUrl({ protocols: ['https'], require_protocol: true })
   @MaxLength(500)
   url: string;
 }
 
-export class VoteDto {
+export class ReportDto {
   @ApiProperty({
-    example: true,
-    description: 'true = helpful, false = not helpful',
+    enum: ReportReason,
+    example: ReportReason.FAKE_OR_NEVER_VISITED,
   })
-  @IsBoolean()
-  helpful: boolean;
-}
-
-export class ReportReviewDto {
-  @ApiProperty({ enum: ReportReason, example: ReportReason.FALSE_EXPERIENCE })
-  @Transform(upper)
+  @Transform(toUpperCase)
   @IsEnum(ReportReason)
-  reason: ReportReason;
+  reasonCode: ReportReason;
 
   @ApiPropertyOptional({
-    example:
-      'This person was never our customer — no order under this name or number.',
+    example: 'We have no record of this order.',
     maxLength: 1000,
   })
   @IsOptional()
   @IsString()
   @MaxLength(1000)
-  details?: string;
+  note?: string;
 }
 
 export class ConsumerResolutionDto {
   @ApiProperty({
     enum: ['resolved', 'reopened'],
     description:
-      'resolved = you report the issue was resolved; reopened = the issue is not resolved after all.',
+      'resolved = you report the complaint resolved; reopened = it is not resolved after all.',
   })
   @IsIn(['resolved', 'reopened'])
   status: 'resolved' | 'reopened';

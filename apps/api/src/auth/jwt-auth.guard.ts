@@ -1,3 +1,4 @@
+import type { Request } from 'express';
 import {
   ExecutionContext,
   Injectable,
@@ -27,7 +28,7 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     );
 
     if (isOptionalAuth) {
-      const request = context.switchToHttp().getRequest();
+      const request = context.switchToHttp().getRequest<Request>();
       const token = extractAccessToken(request);
       if (!token) return true;
     }
