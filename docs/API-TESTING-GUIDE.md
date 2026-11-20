@@ -1,5 +1,8 @@
 # TalkGround API — Endpoint Testing Guide
 
+> **Outdated (v1).** API v2.0 replaced this document's endpoints and data model. Use
+> [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) and [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md).
+
 **For:** Backend developers and QA  
 **Tools:** Swagger UI (`http://localhost:3001/docs`), Postman, or curl  
 **Prerequisites:** Docker Postgres running, migrations applied, seed run

@@ -1,5 +1,8 @@
 # TalkGround — API Specification v1.0
 
+> **Outdated (v1).** API v2.0 replaced this document's endpoints and data model. Use
+> [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) and [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md).
+
 **Base URL:** `http://localhost:3001/api/v1` (dev)  
 **Auth:** JWT access token in `Authorization: Bearer <token>` header  
 **Content-Type:** `application/json` unless noted

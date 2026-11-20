@@ -1,5 +1,8 @@
 # How to document endpoints in Swagger (NestJS)
 
+> **Outdated (v1).** API v2.0 replaced this document's endpoints and data model. Use
+> [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) and [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md).
+
 **Swagger UI:** `http://localhost:3001/docs`  
 **OpenAPI JSON:** `http://localhost:3001/docs/openapi.json`
 

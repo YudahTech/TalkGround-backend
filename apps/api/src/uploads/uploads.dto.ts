@@ -1,13 +1,17 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsIn } from 'class-validator';
+import { UPLOAD_FOLDERS } from './uploads.service';
+import type { UploadFolder } from './uploads.service';
 
 export class UploadSignatureDto {
   @ApiProperty({
-    enum: ['reviews', 'receipts', 'brands', 'avatars'],
-    example: 'reviews',
+    enum: UPLOAD_FOLDERS,
+    example: 'evidence',
     description:
-      'Cloudinary folder under talkground/. receipts are private (type=authenticated). POST every key in data.params with the file.',
+      'evidence = public review photos; evidence-private = receipts/screenshots/documents (private); ' +
+      'logos = business logos; avatars = profile photos; claim-documents = ownership documents (private). ' +
+      'POST every key in data.params with the file to data.uploadUrl.',
   })
-  @IsIn(['reviews', 'receipts', 'brands', 'avatars'])
-  folder: 'reviews' | 'receipts' | 'brands' | 'avatars';
+  @IsIn(UPLOAD_FOLDERS)
+  folder: UploadFolder;
 }

@@ -18,7 +18,9 @@ export class SmsService {
   normalizePhone(phone: string): string {
     const formatted = this.formatPhone(phone);
     if (!/^234[789]\d{9}$/.test(formatted)) {
-      throw new BadRequestException('Enter a valid Nigerian mobile number, e.g. +2348012345678');
+      throw new BadRequestException(
+        'Enter a valid Nigerian mobile number, e.g. +2348012345678',
+      );
     }
     return `+${formatted}`;
   }
@@ -28,7 +30,9 @@ export class SmsService {
     const senderId = this.config.get('TERMII_SENDER_ID', 'TalkGround');
 
     if (!apiKey) {
-      this.logger.warn('TERMII_API_KEY not set — SMS not sent (set OTP_DEV_MODE=true for local testing)');
+      this.logger.warn(
+        'TERMII_API_KEY not set — SMS not sent (set OTP_DEV_MODE=true for local testing)',
+      );
       return false;
     }
 

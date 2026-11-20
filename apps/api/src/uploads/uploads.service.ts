@@ -7,7 +7,25 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { v2 as cloudinary } from 'cloudinary';
 
-export type UploadFolder = 'reviews' | 'receipts' | 'brands' | 'avatars';
+/**
+ * - evidence          public review photos
+ * - evidence-private  receipts, screenshots, documents (type=authenticated, staff-only signed URLs)
+ * - logos             business logos
+ * - avatars           user avatars
+ * - claim-documents   ownership documents (type=authenticated, PRD §7.5: never public)
+ */
+export const UPLOAD_FOLDERS = [
+  'evidence',
+  'evidence-private',
+  'logos',
+  'avatars',
+  'claim-documents',
+] as const;
+export type UploadFolder = (typeof UPLOAD_FOLDERS)[number];
+
+export function isPrivateFolder(folder: UploadFolder): boolean {
+  return folder === 'evidence-private' || folder === 'claim-documents';
+}
 
 const ALLOWED_FORMATS = ['jpg', 'jpeg', 'png', 'webp'];
 const MAX_BYTES = 5 * 1024 * 1024;
@@ -58,8 +76,8 @@ export class UploadsService {
    * (plus `file`, `api_key`, `signature`) to `uploadUrl` — Cloudinary rejects the upload
    * if any signed parameter is missing or changed.
    *
-   * Receipts are uploaded with type=authenticated: they cannot be fetched by plain URL,
-   * only through a signed URL that the API hands to moderators.
+   * Private folders are uploaded with type=authenticated: they cannot be fetched by plain URL,
+   * only through a short-lived signed URL that the API hands to authorised staff.
    */
   getSignature(folder: UploadFolder) {
     this.assertConfigured();
@@ -75,7 +93,7 @@ export class UploadsService {
       folder: uploadFolder,
       allowed_formats: ALLOWED_FORMATS.join(','),
     };
-    if (folder === 'receipts') params.type = 'authenticated';
+    if (isPrivateFolder(folder)) params.type = 'authenticated';
 
     const signature = cloudinary.utils.api_sign_request(params, apiSecret);
 
@@ -99,7 +117,7 @@ export class UploadsService {
   async verifyAsset(url: string, folder: UploadFolder): Promise<VerifiedAsset> {
     this.assertConfigured();
     const cloudName = this.config.get<string>('CLOUDINARY_CLOUD_NAME')!;
-    const expectedType = folder === 'receipts' ? 'authenticated' : 'upload';
+    const expectedType = isPrivateFolder(folder) ? 'authenticated' : 'upload';
 
     const pattern = new RegExp(
       `^https://res\\.cloudinary\\.com/${escapeRegex(cloudName)}/image/(upload|authenticated)/` +
@@ -116,8 +134,8 @@ export class UploadsService {
     const [, deliveryType, publicId, format] = match;
     if (deliveryType !== expectedType) {
       throw new BadRequestException(
-        folder === 'receipts'
-          ? 'Receipts must be uploaded privately (type=authenticated). Use the params from POST /uploads/signature.'
+        isPrivateFolder(folder)
+          ? 'This file must be uploaded privately (type=authenticated). Use the params from POST /uploads/signature.'
           : 'Invalid delivery type for this image',
       );
     }
@@ -151,8 +169,11 @@ export class UploadsService {
     };
   }
 
-  /** Short path for moderators to view a private receipt. Returns the original URL for legacy public uploads. */
-  privateViewUrl(storedUrl: string): string {
+  /**
+   * Short-lived signed URL for authorised staff to view a private file (default 10 minutes).
+   * Returns the original URL for public uploads.
+   */
+  privateViewUrl(storedUrl: string, ttlSeconds = 600): string {
     if (!this.isConfigured()) return storedUrl;
     const match =
       /\/image\/authenticated\/(?:s--[A-Za-z0-9_-]+--\/)?(?:v\d+\/)?(.+)\.([a-z0-9]+)$/i.exec(
@@ -165,6 +186,7 @@ export class UploadsService {
       secure: true,
       resource_type: 'image',
       format: match[2],
+      expires_at: Math.floor(Date.now() / 1000) + ttlSeconds,
     });
   }
 }

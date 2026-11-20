@@ -34,10 +34,14 @@ export function checkSecurityConfig() {
   if (!secret) {
     // Without a secret the app falls back to a public default and anyone could forge tokens.
     if (isProd) throw new Error('JWT_SECRET is not set');
-    logger.warn('JWT_SECRET is not set — using an insecure development default');
+    logger.warn(
+      'JWT_SECRET is not set — using an insecure development default',
+    );
   } else if (secret.length < 32 || secret.startsWith('change-me')) {
     // Warn instead of crash so an existing deployment with a short secret keeps running.
-    logger.warn('JWT_SECRET is weak (<32 chars or a placeholder) — rotate it to 32+ random characters');
+    logger.warn(
+      'JWT_SECRET is weak (<32 chars or a placeholder) — rotate it to 32+ random characters',
+    );
   }
   if (envFlag(process.env.OTP_DEV_MODE, false)) {
     logger.warn(

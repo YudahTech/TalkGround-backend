@@ -3,125 +3,177 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
   Param,
+  ParseUUIDPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
 } from '@nestjs/common';
-import { ApiCookieAuth, ApiBody, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiCookieAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import type { Request } from 'express';
+import { OptionalAuth } from '../common/decorators';
+import { CurrentUser } from '../common/current-user.decorator';
+import type { AuthUser } from '../common/current-user.decorator';
+import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
 import { ReviewsService } from './reviews.service';
 import {
-  AddMediaDto,
+  AddEvidenceDto,
+  ConsumerResolutionDto,
   CreateReviewDto,
-  ListBrandReviewsQueryDto,
+  MyReviewsQueryDto,
   ReportReviewDto,
   UpdateReviewDto,
-} from '../brands/brands.dto';
-import { CurrentUser } from '../common/current-user.decorator';
-import { OptionalAuth, Public } from '../common/decorators';
-import { SWAGGER_COOKIE_AUTH } from '../common/swagger';
+  VoteDto,
+} from './reviews.dto';
+
+const MINUTE = 60_000;
+const uuid = new ParseUUIDPipe({ version: '4' });
 
 @ApiTags('Reviews')
+@ApiCookieAuth(SWAGGER_COOKIE_AUTH)
 @Controller()
 export class ReviewsController {
   constructor(private reviews: ReviewsService) {}
 
-  @OptionalAuth()
+  @Throttle({ default: { limit: 10, ttl: MINUTE } })
   @ApiOperation({
-    summary: 'List reviews for a brand (public; optional JWT for helpfulByMe)',
+    summary: 'Write a review (verified email required)',
     description:
-      'Query: sort=recent|rating_high|rating_low|helpful|verified_first (default recent). page default 1, limit default 20.',
+      'Rate the required dimensions of the business category (GET /categories/:slug). ' +
+      'Most reviews publish immediately; some are held for a quick moderator check (data.moderation explains). ' +
+      'One current review per business: edit it, or after the repeat period send newExperience: true.',
   })
-  @Get('brands/:slug/reviews')
-  findByBrand(
-    @Param('slug') slug: string,
-    @Query() query: ListBrandReviewsQueryDto,
-    @CurrentUser() user?: { id: string } | null,
-  ) {
-    return this.reviews.findByBrandSlug(
-      slug,
-      query.sort ?? 'recent',
-      query.page ?? 1,
-      query.limit ?? 20,
-      user?.id,
-    );
-  }
-
-  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-  @ApiOperation({
-    summary: 'Create review (JWT; verified email + phone required)',
-    description:
-      'Returns 403 "Verify your email and phone…" until both are verified (configurable via REVIEW_REQUIRE_*_VERIFIED). Max 3 per 24h, one per brand.',
-  })
-  @ApiBody({ type: CreateReviewDto })
   @Post('reviews')
   create(
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: AuthUser,
     @Body() dto: CreateReviewDto,
-    @Req() req: { ip?: string; socket: { remoteAddress?: string } },
+    @Req() req: Request,
   ) {
-    const ip = req.ip || req.socket.remoteAddress;
-    return this.reviews.create(user, dto, ip);
+    return this.reviews.create(user, dto, req.ip);
   }
 
-  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-  @ApiOperation({ summary: 'Update own review (JWT). Previous version is kept; trust checks re-run.' })
-  @ApiBody({ type: UpdateReviewDto })
+  @ApiOperation({ summary: 'My reviews, every status (review history)' })
+  @Get('users/me/reviews')
+  mine(@CurrentUser() user: AuthUser, @Query() q: MyReviewsQueryDto) {
+    return this.reviews.mine(user.id, q.page, q.limit);
+  }
+
+  @OptionalAuth()
+  @ApiOperation({
+    summary: 'One review with its business response and resolution history',
+  })
+  @Get('reviews/:id')
+  getOne(@Param('id', uuid) id: string, @CurrentUser() user?: AuthUser | null) {
+    return this.reviews.getOne(id, user);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: MINUTE } })
+  @ApiOperation({
+    summary:
+      'Edit my review (previous version is kept; limited number of edits)',
+  })
   @Patch('reviews/:id')
   update(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Param('id', uuid) id: string,
     @Body() dto: UpdateReviewDto,
-    @Req() req: { ip?: string; socket: { remoteAddress?: string } },
+    @Req() req: Request,
   ) {
-    return this.reviews.update(user, id, dto, req.ip || req.socket.remoteAddress);
+    return this.reviews.update(user, id, dto, req.ip);
   }
 
-  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-  @ApiOperation({ summary: 'Soft-delete own review (JWT)' })
-  @Delete('reviews/:id')
-  remove(@CurrentUser() user: { id: string }, @Param('id') id: string) {
-    return this.reviews.remove(user, id);
-  }
-
-  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
   @ApiOperation({
-    summary: 'Attach photo/receipt URL after Cloudinary upload (JWT)',
+    summary: 'Withdraw my review (hidden publicly, history kept)',
   })
-  @ApiBody({ type: AddMediaDto })
-  @Post('reviews/:id/media')
-  addMedia(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
-    @Body() dto: AddMediaDto,
-  ) {
-    return this.reviews.addMedia(user, id, dto);
+  @Delete('reviews/:id')
+  withdraw(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string) {
+    return this.reviews.withdraw(user, id);
   }
 
-  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-  @ApiOperation({ summary: 'Report a review (JWT)' })
-  @ApiBody({ type: ReportReviewDto })
-  @Post('reviews/:id/report')
+  @ApiOperation({ summary: 'Previous versions of my review' })
+  @Get('reviews/:id/revisions')
+  revisions(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string) {
+    return this.reviews.revisions(user, id);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: MINUTE } })
+  @ApiOperation({
+    summary: 'Attach evidence to my review',
+    description:
+      'Upload first via POST /uploads/signature: folder "evidence" for a public PHOTO, "evidence-private" for RECEIPT / SCREENSHOT / DOCUMENT. ' +
+      'Attached evidence shows the "Evidence attached" label; "Evidence reviewed" only appears after a moderator examines it.',
+  })
+  @Post('reviews/:id/evidence')
+  addEvidence(
+    @CurrentUser() user: AuthUser,
+    @Param('id', uuid) id: string,
+    @Body() dto: AddEvidenceDto,
+  ) {
+    return this.reviews.addEvidence(user, id, dto);
+  }
+
+  @ApiOperation({
+    summary: 'Remove evidence from my review (not once it has been reviewed)',
+  })
+  @Delete('reviews/:id/evidence/:evidenceId')
+  removeEvidence(
+    @CurrentUser() user: AuthUser,
+    @Param('id', uuid) id: string,
+    @Param('evidenceId', uuid) evidenceId: string,
+  ) {
+    return this.reviews.removeEvidence(user, id, evidenceId);
+  }
+
+  @Throttle({ default: { limit: 30, ttl: MINUTE } })
+  @ApiOperation({
+    summary:
+      'Vote helpful / not helpful (one vote per review; send again to change)',
+  })
+  @Put('reviews/:id/vote')
+  vote(
+    @CurrentUser() user: AuthUser,
+    @Param('id', uuid) id: string,
+    @Body() dto: VoteDto,
+  ) {
+    return this.reviews.vote(user, id, dto.helpful);
+  }
+
+  @ApiOperation({ summary: 'Remove my vote' })
+  @Delete('reviews/:id/vote')
+  removeVote(@CurrentUser() user: AuthUser, @Param('id', uuid) id: string) {
+    return this.reviews.removeVote(user, id);
+  }
+
+  @Throttle({ default: { limit: 10, ttl: MINUTE } })
+  @ApiOperation({
+    summary:
+      'Report a review that breaks the rules (consumers and business representatives)',
+  })
+  @Post('reviews/:id/reports')
   report(
-    @CurrentUser() user: { id: string },
-    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Param('id', uuid) id: string,
     @Body() dto: ReportReviewDto,
   ) {
     return this.reviews.report(user, id, dto);
   }
 
-  @ApiCookieAuth(SWAGGER_COOKIE_AUTH)
-  @ApiOperation({ summary: 'Toggle helpful vote (JWT)' })
-  @Post('reviews/:id/helpful')
-  toggleHelpful(@CurrentUser() user: { id: string }, @Param('id') id: string) {
-    return this.reviews.toggleHelpful(user.id, id);
-  }
-
-  @Public()
-  @ApiOperation({ summary: 'Increment review view count (public)' })
-  @Post('reviews/:id/view')
-  recordView(@Param('id') id: string) {
-    return this.reviews.recordView(id);
+  @HttpCode(200)
+  @ApiOperation({
+    summary: 'Report my complaint resolved, or reopen it (review author only)',
+    description:
+      'Businesses can only PROPOSE a resolution; only the reviewer can mark it resolved. Never changes the rating.',
+  })
+  @Post('reviews/:id/resolution')
+  resolution(
+    @CurrentUser() user: AuthUser,
+    @Param('id', uuid) id: string,
+    @Body() dto: ConsumerResolutionDto,
+  ) {
+    return this.reviews.consumerResolution(user, id, dto);
   }
 }

@@ -1,5 +1,8 @@
 # TalkGround — Design → Backend Mapping
 
+> **Outdated (v1).** API v2.0 replaced this document's endpoints and data model. Use
+> [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) and [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md).
+
 **Audience:** Frontend + backend developers  
 **Product scope:** Restaurants & hotels in **Lagos** and **Abuja** only  
 **Pattern:** Public discovery (Yelp / Trustpilot style), protected actions

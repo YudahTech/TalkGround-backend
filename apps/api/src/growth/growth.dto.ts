@@ -1,14 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
   IsBoolean,
   IsEmail,
-  IsEnum,
+  IsIn,
+  MaxLength,
   IsObject,
   IsOptional,
   IsString,
 } from 'class-validator';
-import { City, PrimaryUse } from '@prisma/client';
 
 export class SurveyResponseDto {
   @ApiProperty({
@@ -45,30 +44,17 @@ export class WaitlistDto {
   @IsString()
   phone?: string;
 
-  @ApiProperty({ enum: City, example: City.LAGOS })
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
-  )
-  @IsEnum(City)
-  city: City;
+  @ApiProperty({ example: 'lagos', description: 'City or state (free text)' })
+  @IsString()
+  @MaxLength(80)
+  city: string;
 
   @ApiProperty({
-    enum: PrimaryUse,
-    example: PrimaryUse.BOTH,
-    description:
-      'Also accepts lowercase: restaurants | hotels | both | write_reviews',
+    enum: ['find_businesses', 'write_reviews', 'manage_my_business', 'all'],
+    example: 'find_businesses',
   })
-  @Transform(({ value }) => {
-    const map: Record<string, PrimaryUse> = {
-      restaurants: PrimaryUse.RESTAURANTS,
-      hotels: PrimaryUse.HOTELS,
-      both: PrimaryUse.BOTH,
-      write_reviews: PrimaryUse.WRITE_REVIEWS,
-    };
-    return map[value as string] ?? value;
-  })
-  @IsEnum(PrimaryUse)
-  primaryUse: PrimaryUse;
+  @IsIn(['find_businesses', 'write_reviews', 'manage_my_business', 'all'])
+  primaryUse: string;
 
   @ApiPropertyOptional({ example: 'twitter' })
   @IsOptional()

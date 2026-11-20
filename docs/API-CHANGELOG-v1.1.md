@@ -1,5 +1,8 @@
 # TalkGround API v1.1 — Security & trust release (frontend migration guide)
 
+> **Outdated (v1).** API v2.0 replaced this document's endpoints and data model. Use
+> [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) and [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md).
+
 > **Superseded for auth by v1.2:** Bearer tokens were removed. Auth is HttpOnly-cookie only and
 > responses no longer contain `accessToken` / `refreshToken`. Sections 2.1–2.3 below describe the old
 > dual mode — follow **[FRONTEND-AUTH.md](./FRONTEND-AUTH.md)** instead. Verification and upload

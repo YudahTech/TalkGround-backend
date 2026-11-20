@@ -1,18 +1,18 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Transform } from 'class-transformer';
 import {
-  IsArray,
-  IsEnum,
   IsOptional,
   IsString,
   IsUrl,
   MaxLength,
   MinLength,
 } from 'class-validator';
-import { City, ReviewInterest } from '@prisma/client';
 
 export class UpdateProfileDto {
-  @ApiPropertyOptional({ example: 'Chinedu Okafor', minLength: 2, maxLength: 80 })
+  @ApiPropertyOptional({
+    example: 'Chinedu Okafor',
+    minLength: 2,
+    maxLength: 80,
+  })
   @IsOptional()
   @IsString()
   @MinLength(2)
@@ -20,7 +20,7 @@ export class UpdateProfileDto {
   displayName?: string;
 
   @ApiPropertyOptional({
-    example: 'Food lover exploring Lagos & Abuja.',
+    example: 'I review gadget shops so you do not get burnt.',
     maxLength: 280,
   })
   @IsOptional()
@@ -29,33 +29,33 @@ export class UpdateProfileDto {
   bio?: string;
 
   @ApiPropertyOptional({
-    example: 'https://res.cloudinary.com/demo/image/upload/avatar.jpg',
+    example:
+      'https://res.cloudinary.com/demo/image/upload/v1/talkground/avatars/abc.jpg',
+    description:
+      'Upload with POST /uploads/signature (folder "avatars") first. Empty string removes it.',
   })
   @IsOptional()
-  @IsUrl()
+  @IsUrl({ protocols: ['https'], require_protocol: true }, { each: false })
+  @MaxLength(500)
   avatarUrl?: string;
 
-  @ApiPropertyOptional({ enum: City, example: City.LAGOS })
-  @IsOptional()
-  @Transform(({ value }) =>
-    typeof value === 'string' ? value.toUpperCase() : value,
-  )
-  @IsEnum(City)
-  city?: City;
-
   @ApiPropertyOptional({
-    enum: ReviewInterest,
-    isArray: true,
-    example: [ReviewInterest.RESTAURANTS],
+    example: 'Lagos',
+    description:
+      'Shown on your public profile. Leave empty to hide. Never use your home address.',
+    maxLength: 80,
   })
   @IsOptional()
-  @IsArray()
-  @IsEnum(ReviewInterest, { each: true })
-  interests?: ReviewInterest[];
+  @IsString()
+  @MaxLength(80)
+  location?: string;
 }
 
 export class DeleteAccountDto {
-  @ApiProperty({ example: 'myCurrentPassword', description: 'Current password, to confirm' })
+  @ApiProperty({
+    example: 'myCurrentPassword',
+    description: 'Current password, to confirm',
+  })
   @IsString()
   @MaxLength(72)
   password: string;

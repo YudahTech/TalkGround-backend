@@ -19,7 +19,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       const message =
         typeof res === 'string'
           ? res
-          : (res as { message?: string | string[] }).message ?? 'Error';
+          : ((res as { message?: string | string[] }).message ?? 'Error');
 
       response.status(status).json({
         error: {

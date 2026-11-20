@@ -90,13 +90,16 @@ Exact DTO fields and validation rules are in Swagger (Schemas → `RegisterDto`,
       "email": "chinedu.okafor@gmail.com",
       "username": "chinedu_okafor",
       "displayName": "Chinedu Okafor",
-      "role": "USER",
       "emailVerified": true,
-      "phoneVerified": true,
-      "phone": "+2348012345678",
+      "phoneVerified": false,
+      "phone": null,
       "avatarUrl": null,
       "bio": null,
-      "city": "lagos"
+      "location": "Lagos",
+      "isStaff": false,
+      "staffRole": null,
+      "permissions": [],
+      "createdAt": "2026-07-23T10:00:00.000Z"
     }
   }
 }
@@ -181,9 +184,12 @@ import { api, ApiError } from './api';
 
 type User = {
   id: string; email: string; username: string; displayName: string;
-  role: 'USER' | 'MODERATOR' | 'ADMIN';
   emailVerified: boolean; phoneVerified: boolean;
-  phone: string | null; avatarUrl: string | null; bio: string | null; city: string | null;
+  phone: string | null; avatarUrl: string | null; bio: string | null; location: string | null;
+  isStaff: boolean;
+  staffRole: { key: string; name: string } | null;
+  permissions: string[]; // e.g. 'REVIEWS_MODERATE' — gate staff UI on these
+  createdAt: string;
 };
 
 type AuthState = {
@@ -255,7 +261,7 @@ Do it client-side with `useAuth()`: while `loading` show a skeleton; if `user` i
 | `400` | Validation failed | Show `error.message` |
 | `401` | Not logged in / session expired (after one refresh attempt) | `setUser(null)`, redirect to login |
 | `403` `"Cross-site request blocked"` | Your origin isn't in `CORS_ORIGIN` | Config issue — tell the backend team the URL |
-| `403` other | Wrong role, suspended, or unverified email/phone for reviews | Show message / send to verification screen |
+| `403` other | Missing staff permission, not the business manager, or unverified email (reviews, votes, submissions, claims) | Show message / send to verification screen |
 | `429` | Rate limited, or account locked after 10 failed logins (15 min) | Show `error.message`, disable the button briefly |
 
 ---
@@ -325,4 +331,4 @@ The `Origin` header is required on `POST`s that carry cookies (see §4.5).
 - [ ] Cloudinary upload uses plain `fetch` without credentials
 - [ ] Your dev/preview/prod URLs sent to backend for `CORS_ORIGIN`
 
-Related: [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) (all endpoints & screens) · [API-CHANGELOG-v1.1.md](./API-CHANGELOG-v1.1.md) (verification & uploads)
+Related: [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) (all endpoints & screens, API v2.0) · [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md)

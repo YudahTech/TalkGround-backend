@@ -82,7 +82,8 @@ export class AuthController {
   @HttpCode(200)
   @Throttle({ default: { limit: 30, ttl: MINUTE } })
   @ApiOperation({
-    summary: 'Rotate the session cookies using the talkground_rt cookie (no body)',
+    summary:
+      'Rotate the session cookies using the talkground_rt cookie (no body)',
     description:
       'Reads the HttpOnly talkground_rt cookie and sets fresh talkground_at + talkground_rt cookies. ' +
       'The old refresh token stops working. Replaying an already-used refresh token signs the user out everywhere. ' +

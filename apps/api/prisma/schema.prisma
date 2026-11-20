@@ -1,16 +1,44 @@
+// TalkGround data model — follows PRD §12 (Data Model and Core Entities).
+//
+// Design notes
+// - Categories, rating dimensions and admin roles are DATA, not enums (PRD §5, §7.6, §8.1):
+//   a new category or dimension is a row, never a schema change.
+// - Listing status and ownership status are separate columns. The PRD's 8-stage lifecycle
+//   (§7.4) is derived from them plus BusinessSubmission (see businesses/lifecycle.ts).
+// - "Nullable unique key" columns (uniqueKey, activeKey) enforce conditional uniqueness in the
+//   database itself (Postgres treats NULLs as distinct), so races cannot create duplicates.
+// - Ratings are denormalised onto Business (reviewCount, ratingAverage, ratingDistribution) and
+//   always recomputed from source rows by RatingsService — never incremented.
+
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pg_trgm]
 }
 
-enum UserRole {
-  USER
-  MODERATOR
-  ADMIN
+// ───────────────────────────────────────────────────────────────────────── enums
+
+/// Fine-grained staff permissions (PRD §8.1: not every administrator gets every sensitive operation).
+enum AdminPermission {
+  USERS_VIEW
+  USERS_RESTRICT
+  STAFF_MANAGE
+  BUSINESSES_MANAGE
+  BUSINESSES_MERGE
+  SUBMISSIONS_REVIEW
+  CLAIMS_REVIEW
+  CLAIM_DOCUMENTS_VIEW
+  REVIEWS_MODERATE
+  EVIDENCE_REVIEW
+  REPORTS_MANAGE
+  DISPUTES_MANAGE
+  TAXONOMY_MANAGE
+  AUDIT_VIEW
 }
 
 enum OtpPurpose {
@@ -18,121 +46,259 @@ enum OtpPurpose {
   EMAIL
 }
 
-enum BrandCategory {
-  RESTAURANTS
-  HOTELS
+/// Publication state of a listing (PRD §7.4).
+enum BusinessStatus {
+  PENDING_REVIEW
+  PUBLISHED
+  SUSPENDED
+  MERGED
+  ARCHIVED
 }
 
-enum RestaurantSubType {
-  CASUAL
-  FAST_FOOD
-  FINE_DINING
-  BUKA
+/// Ownership state, independent of publication (PRD §7.3: claimed / unclaimed / ownership-verified).
+enum OwnershipStatus {
+  UNCLAIMED
+  CLAIM_PENDING
+  CLAIMED
+  VERIFIED
 }
 
-enum HotelSubType {
-  HOTEL
-  GUEST_HOUSE
-  SHORT_LET
+enum BusinessSource {
+  ADMIN
+  CONSUMER_SUGGESTION
+  OWNER_SUBMISSION
 }
 
-enum City {
-  LAGOS
-  ABUJA
+enum IdentifierType {
+  INSTAGRAM
+  TIKTOK
+  FACEBOOK
+  X
+  WHATSAPP
+  WEBSITE
+  PHONE
+  EMAIL
+  ALTERNATIVE_NAME
+  CAC_NUMBER
+  OTHER
 }
 
-enum BrandStatus {
-  ACTIVE
-  INACTIVE
+enum LocationType {
+  ADDRESS
+  SERVICE_AREA
+}
+
+enum SubmissionSource {
+  CONSUMER_SUGGESTION
+  OWNER_SUBMISSION
+}
+
+enum SubmissionStatus {
+  PENDING_REVIEW
+  APPROVED
+  REJECTED
+  MERGED
+}
+
+enum ClaimStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum VerificationMethod {
+  BUSINESS_EMAIL
+  WEBSITE_DOMAIN
+  SOCIAL_ACCOUNT
+  DOCUMENTS
+  MANUAL_REVIEW
+}
+
+enum MemberRole {
+  OWNER
 }
 
 enum ReviewStatus {
+  PENDING_MODERATION
   PUBLISHED
-  PENDING_VERIFICATION
-  FLAGGED
-  SUSPENDED
+  UNDER_INVESTIGATION
+  REMOVED
+  WITHDRAWN
+}
+
+enum EvidenceKind {
+  PHOTO
+  RECEIPT
+  SCREENSHOT
+  DOCUMENT
+}
+
+enum EvidenceStatus {
+  NOT_REVIEWED
+  ACCEPTED
+  REJECTED
+}
+
+/// PRD §7.8 resolution statuses.
+enum ResolutionStatus {
+  NONE
+  BUSINESS_RESPONDED
+  RESOLUTION_PROPOSED
+  RESOLVED_BY_CONSUMER
+  DISPUTE_REOPENED
+}
+
+enum ActorType {
+  CONSUMER
+  BUSINESS
+  SYSTEM
+  STAFF
+}
+
+enum VoteValue {
+  HELPFUL
+  NOT_HELPFUL
+}
+
+enum ResponseStatus {
+  PUBLISHED
   REMOVED
 }
 
-enum MediaType {
-  PHOTO
-  RECEIPT
+/// PRD §8.3 report reasons (also used for business disputes, PRD §8.4).
+enum ReportReason {
+  FALSE_EXPERIENCE
+  SPAM_PROMOTIONAL
+  PERSONAL_INFORMATION
+  HARASSMENT_ABUSE
+  CONFLICT_OF_INTEREST
+  IMPERSONATION
+  OTHER_POLICY_VIOLATION
 }
 
+enum ReporterType {
+  CONSUMER
+  BUSINESS
+}
+
+enum ReportStatus {
+  OPEN
+  ACTIONED
+  DISMISSED
+}
+
+enum DisputeStatus {
+  OPEN
+  UPHELD
+  REJECTED
+  WITHDRAWN
+}
+
+/// Automatic fraud signals. They only queue a review for a human; they never decide.
 enum FlagType {
   IP_MATCH
   DUPLICATE_TEXT
   VELOCITY
   NEW_ACCOUNT_LOW_RATING
-  REPORT_THRESHOLD
-  MANUAL
+  BUSINESS_MEMBER
 }
 
-enum ReportReason {
-  FAKE_SPAM
-  NEVER_VISITED
-  OFFENSIVE
-  PAID_INCENTIVIZED
-  PERSONAL_INFO
+enum ModerationTarget {
+  REVIEW
+  BUSINESS_RESPONSE
+  EVIDENCE
+  BUSINESS
+  USER
+}
+
+enum ModerationActionType {
+  PUBLISH
+  REMOVE
+  RESTORE
+  MARK_UNDER_INVESTIGATION
+  CLEAR_INVESTIGATION
+  ACCEPT_EVIDENCE
+  REJECT_EVIDENCE
+  DISMISS_REPORT
+  ACTION_REPORT
+  UPHOLD_DISPUTE
+  REJECT_DISPUTE
+  SUSPEND
+  UNSUSPEND
+}
+
+/// PRD §8.2 policy grounds a moderation decision must cite.
+enum PolicyReason {
+  SPAM
+  FABRICATED_REVIEW
+  HARASSMENT
+  THREATS
+  HATE_SPEECH
+  IMPERSONATION
+  PERSONAL_INFORMATION
+  MANIPULATED_RATINGS
+  FAKE_EVIDENCE
   CONFLICT_OF_INTEREST
+  DEFAMATORY_OR_UNLAWFUL
+  NO_VIOLATION
   OTHER
 }
 
-enum ReportStatus {
-  OPEN
-  DISMISSED
-  ACTIONED
-}
-
-enum SuggestionStatus {
-  PENDING
-  APPROVED
-  REJECTED
-}
-
-enum PrimaryUse {
-  RESTAURANTS
-  HOTELS
-  BOTH
-  WRITE_REVIEWS
-}
-
-enum ReviewInterest {
-  RESTAURANTS
-  HOTELS
-}
+// ─────────────────────────────────────────────────────────────── accounts & staff
 
 model User {
-  id            String    @id @default(uuid())
-  email         String    @unique
-  passwordHash  String
-  displayName   String
-  username      String    @unique
-  phone         String?
-  bio           String?
-  avatarUrl     String?
-  city          City?
-  interests     ReviewInterest[]
-  emailVerified Boolean   @default(false)
-  phoneVerified Boolean   @default(false)
-  role          UserRole  @default(USER)
-  suspended     Boolean   @default(false)
-  suspendedReason String?
+  id               String    @id @default(uuid())
+  email            String    @unique
+  passwordHash     String
+  displayName      String
+  username         String    @unique
+  phone            String?
+  bio              String?
+  avatarUrl        String?
+  /// Free-text location the user chose to show publicly (PRD §7.1: only what users choose).
+  location         String?
+  emailVerified    Boolean   @default(false)
+  phoneVerified    Boolean   @default(false)
+  adminRoleId      String?
+  suspended        Boolean   @default(false)
+  suspendedReason  String?
   tokenVersion     Int       @default(0)
   failedLoginCount Int       @default(0)
   lockedUntil      DateTime?
   deletedAt        DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
+  adminRole         AdminRole?           @relation(fields: [adminRoleId], references: [id], onDelete: SetNull)
   reviews           Review[]
-  reports           ReviewReport[]
-  brandSuggestions  BrandSuggestion[]
+  reports           ReviewReport[]       @relation("ReportReporter")
+  submissions       BusinessSubmission[] @relation("SubmissionAuthor")
+  claims            BusinessClaim[]      @relation("ClaimClaimant")
+  memberships       BusinessMember[]
+  responses         BusinessResponse[]
+  disputes          BusinessDispute[]    @relation("DisputeRaiser")
   otpCodes          OtpCode[]
-  helpfulVotes      ReviewHelpfulVote[]
+  helpfulVotes      HelpfulVote[]
   refreshTokens     RefreshToken[]
   passwordResets    PasswordResetToken[]
   auditLogs         AuditLog[]
+  moderationActions ModerationAction[]
+
+  @@index([adminRoleId])
+}
+
+/// Named bundle of permissions (PRD §12 AdminRole). A user with no role is not staff.
+model AdminRole {
+  id          String            @id @default(uuid())
+  key         String            @unique
+  name        String
+  description String?
+  permissions AdminPermission[]
+  isSystem    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+  users       User[]
 }
 
 /// One-time codes for phone (SMS) and email verification. `code` stores an HMAC, never the plain code.
@@ -176,7 +342,7 @@ model PasswordResetToken {
   @@index([userId])
 }
 
-/// Append-only record of sensitive actions (moderation, suspensions, role changes, deletions).
+/// Append-only record of sensitive actions (PRD §8.5): actor, action, affected record, timestamp.
 model AuditLog {
   id         String   @id @default(uuid())
   actorId    String?
@@ -193,92 +359,433 @@ model AuditLog {
   @@index([createdAt])
 }
 
-model Brand {
-  id          String            @id @default(uuid())
+// ──────────────────────────────────────────────────────────────────── taxonomy
+
+/// PRD §12 BusinessCategory. Expandable without code changes (PRD §5).
+model BusinessCategory {
+  id          String               @id @default(uuid())
+  slug        String               @unique
   name        String
-  slug        String            @unique
   description String?
-  logoUrl     String?
-  website     String?
-  category    BrandCategory
-  subType     String?
-  tags        String[]          @default([])
-  city        City
-  area        String
-  claimed     Boolean           @default(false)
-  status      BrandStatus       @default(ACTIVE)
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
+  isActive    Boolean              @default(true)
+  sortOrder   Int                  @default(0)
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+  dimensions  CategoryDimension[]
+  businesses  Business[]
+  submissions BusinessSubmission[]
+}
 
+/// A configurable experience dimension, e.g. "Communication" (PRD §7.6 Rating Dimensions).
+model RatingDimension {
+  id          String              @id @default(uuid())
+  key         String              @unique
+  name        String
+  description String?
+  isActive    Boolean             @default(true)
+  createdAt   DateTime            @default(now())
+  categories  CategoryDimension[]
+  scores      ReviewDimension[]
+}
+
+/// Which dimensions apply to a category, and whether reviewers must rate them.
+model CategoryDimension {
+  categoryId  String
+  dimensionId String
+  isRequired  Boolean          @default(false)
+  sortOrder   Int              @default(0)
+  category    BusinessCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  dimension   RatingDimension  @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+
+  @@id([categoryId, dimensionId])
+}
+
+// ─────────────────────────────────────────────────────────────────── businesses
+
+/// PRD §12 Business.
+model Business {
+  id                 String                   @id @default(uuid())
+  slug               String                   @unique
+  name               String
+  description        String?
+  logoUrl            String?
+  website            String?
+  publicEmail        String?
+  publicPhone        String?
+  categoryId         String
+  status             BusinessStatus           @default(PENDING_REVIEW)
+  ownershipStatus    OwnershipStatus          @default(UNCLAIMED)
+  source             BusinessSource           @default(ADMIN)
+  /// Public "under investigation" label (PRD §6.4).
+  underInvestigation Boolean                  @default(false)
+  investigationNote  String?
+  mergedIntoId       String?
+  createdById        String?
+  publishedAt        DateTime?
+  /// Denormalised rating data. Recomputed from eligible reviews by RatingsService only.
+  reviewCount        Int                      @default(0)
+  ratingAverage      Float?
+  ratingDistribution Json                     @default("{\"1\":0,\"2\":0,\"3\":0,\"4\":0,\"5\":0}")
+  /// Name + alternative names + identifier values; feeds full-text and trigram search.
+  searchText         String                   @default("")
+  searchVector       Unsupported("tsvector")?
+  createdAt          DateTime                 @default(now())
+  updatedAt          DateTime                 @updatedAt
+
+  category    BusinessCategory     @relation(fields: [categoryId], references: [id])
+  mergedInto  Business?            @relation("BusinessMerge", fields: [mergedIntoId], references: [id], onDelete: SetNull)
+  mergedFrom  Business[]           @relation("BusinessMerge")
+  identifiers BusinessIdentifier[]
+  locations   BusinessLocation[]
   reviews     Review[]
+  claims      BusinessClaim[]
+  members     BusinessMember[]
+  responses   BusinessResponse[]
+  disputes    BusinessDispute[]
+  submissions BusinessSubmission[]
+
+  @@index([status, categoryId])
+  @@index([status, reviewCount])
+  @@index([status, ratingAverage])
+  @@index([searchVector], type: Gin)
+  @@index([searchText(ops: raw("gin_trgm_ops"))], type: Gin, map: "Business_searchText_trgm_idx")
 }
 
+/// PRD §7.3 Business Identifiers, stored separately from the business (Instagram, website, phone…).
+model BusinessIdentifier {
+  id              String         @id @default(uuid())
+  businessId      String
+  type            IdentifierType
+  value           String
+  normalizedValue String
+  /// `${type}:${normalizedValue}` for identifiers that must be globally unique (handles, domains,
+  /// phones, CAC numbers). NULL for alternative names, which several businesses may share.
+  uniqueKey       String?        @unique
+  isPublic        Boolean        @default(true)
+  createdAt       DateTime       @default(now())
+  business        Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([type, normalizedValue])
+}
+
+/// PRD §12 BusinessLocation: an address or an operating area.
+model BusinessLocation {
+  id          String       @id @default(uuid())
+  businessId  String
+  type        LocationType @default(ADDRESS)
+  addressLine String?
+  area        String?
+  city        String?
+  /// Nigerian state slug (e.g. "lagos", "fct"). NULL with nationwide=true.
+  state       String?
+  nationwide  Boolean      @default(false)
+  countryCode String       @default("NG")
+  isPrimary   Boolean      @default(false)
+  createdAt   DateTime     @default(now())
+  business    Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId])
+  @@index([state, city])
+}
+
+/// PRD §12 BusinessSubmission: consumer suggestions and owner submissions (stage "Suggested").
+model BusinessSubmission {
+  id            String           @id @default(uuid())
+  source        SubmissionSource
+  submittedById String
+  name          String
+  description   String?
+  categoryId    String
+  website       String?
+  state         String?
+  city          String?
+  area          String?
+  addressLine   String?
+  /// [{ type, value }] — validated on submit, turned into BusinessIdentifier rows on approval.
+  identifiers   Json             @default("[]")
+  /// Owner submissions: the submitter's role at the business.
+  ownerRole     String?
+  status        SubmissionStatus @default(PENDING_REVIEW)
+  reviewNote    String?
+  reviewedById  String?
+  reviewedAt    DateTime?
+  /// The listing it became (approved) or was merged into (merged).
+  businessId    String?
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  submittedBy User             @relation("SubmissionAuthor", fields: [submittedById], references: [id], onDelete: Cascade)
+  category    BusinessCategory @relation(fields: [categoryId], references: [id])
+  business    Business?        @relation(fields: [businessId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([submittedById])
+}
+
+/// PRD §12 BusinessClaim: a request to control an existing profile (PRD §7.5).
+model BusinessClaim {
+  id                      String             @id @default(uuid())
+  businessId              String
+  claimantId              String
+  status                  ClaimStatus        @default(PENDING)
+  method                  VerificationMethod
+  claimantRole            String
+  message                 String?
+  /// Business email, website domain or social handle being used to prove control.
+  verificationTarget      String?
+  /// HMAC of the 6-digit code (email) or SHA-256 of the token (domain / social bio).
+  verificationSecretHash  String?
+  verificationExpiresAt   DateTime?
+  verificationAttempts    Int                @default(0)
+  verificationConfirmedAt DateTime?
+  decisionNote            String?
+  reviewedById            String?
+  reviewedAt              DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+  /// `${businessId}:${claimantId}` while PENDING — one open claim per person per business.
+  pendingKey              String?            @unique
+
+  business   Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  claimant   User            @relation("ClaimClaimant", fields: [claimantId], references: [id], onDelete: Cascade)
+  documents  ClaimDocument[]
+  membership BusinessMember?
+
+  @@index([status, createdAt])
+  @@index([businessId])
+  @@index([claimantId])
+}
+
+/// Private ownership evidence (PRD §7.5: never publicly accessible).
+model ClaimDocument {
+  id        String        @id @default(uuid())
+  claimId   String
+  label     String
+  url       String
+  publicId  String
+  format    String
+  createdAt DateTime      @default(now())
+  claim     BusinessClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@index([claimId])
+}
+
+/// Who may manage a business. MVP: one OWNER; the model already allows staff later (PRD §11).
+model BusinessMember {
+  id         String         @id @default(uuid())
+  businessId String
+  userId     String
+  role       MemberRole     @default(OWNER)
+  claimId    String?        @unique
+  createdAt  DateTime       @default(now())
+  revokedAt  DateTime?
+  business   Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user       User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  claim      BusinessClaim? @relation(fields: [claimId], references: [id], onDelete: SetNull)
+
+  @@unique([businessId, userId])
+  @@index([userId])
+}
+
+// ──────────────────────────────────────────────────────────────────────── reviews
+
+/// PRD §12 Review: a customer experience and its overall rating.
 model Review {
-  id             String       @id @default(uuid())
-  brandId        String
-  userId         String
-  rating         Int
-  title          String
-  body           String
-  pros           String?
-  cons           String?
-  recommend      Boolean
-  status         ReviewStatus @default(PUBLISHED)
-  verifiedVisit  Boolean      @default(false)
-  viewCount      Int          @default(0)
-  ipHash         String?
-  textHash       String?
-  editedAt       DateTime?
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id               String           @id @default(uuid())
+  businessId       String
+  userId           String
+  overallRating    Int
+  title            String?
+  body             String
+  experienceDate   DateTime?
+  status           ReviewStatus     @default(PUBLISHED)
+  /// Set when the same user later reviews a new experience; superseded reviews stay public
+  /// as "earlier experience" but no longer count towards the rating.
+  supersededAt     DateTime?
+  /// `${businessId}:${userId}` while this is the user's current review of the business.
+  activeKey        String?          @unique
+  resolutionStatus ResolutionStatus @default(NONE)
+  editCount        Int              @default(0)
+  editedAt         DateTime?
+  ipHash           String?
+  textHash         String?
+  publishedAt      DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
 
-  brand         Brand               @relation(fields: [brandId], references: [id], onDelete: Cascade)
-  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
-  media         ReviewMedia[]
-  flags         ReviewFlag[]
-  reports       ReviewReport[]
-  helpfulVotes  ReviewHelpfulVote[]
-  revisions     ReviewRevision[]
+  business         Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dimensions       ReviewDimension[]
+  evidence         ReviewEvidence[]
+  revisions        ReviewRevision[]
+  response         BusinessResponse?
+  resolutionEvents ResolutionEvent[]
+  helpfulVotes     HelpfulVote[]
+  reports          ReviewReport[]
+  disputes         BusinessDispute[]
+  flags            ReviewFlag[]
 
-  @@unique([brandId, userId])
+  @@index([businessId, status, createdAt])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([textHash])
+  @@index([ipHash, createdAt])
 }
 
-/// Snapshot of a review's content before each edit (edit history).
+/// PRD §12 ReviewDimension: one score per applicable dimension.
+model ReviewDimension {
+  id          String          @id @default(uuid())
+  reviewId    String
+  dimensionId String
+  score       Int
+  review      Review          @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  dimension   RatingDimension @relation(fields: [dimensionId], references: [id])
+
+  @@unique([reviewId, dimensionId])
+  @@index([dimensionId])
+}
+
+/// Content of a review before each edit (PRD §7.6: preserve history).
 model ReviewRevision {
-  id        String   @id @default(uuid())
-  reviewId  String
-  rating    Int
-  title     String
-  body      String
-  pros      String?
-  cons      String?
-  recommend Boolean
-  createdAt DateTime @default(now())
-  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  id             String    @id @default(uuid())
+  reviewId       String
+  overallRating  Int
+  title          String?
+  body           String
+  experienceDate DateTime?
+  /// [{ key, score }]
+  dimensions     Json      @default("[]")
+  createdAt      DateTime  @default(now())
+  review         Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
 
   @@index([reviewId])
 }
 
-model ReviewHelpfulVote {
-  id        String   @id @default(uuid())
+/// PRD §12 ReviewEvidence. Photos are public; receipts, screenshots and documents are private.
+model ReviewEvidence {
+  id           String         @id @default(uuid())
+  reviewId     String
+  kind         EvidenceKind
+  url          String
+  publicId     String
+  isPrivate    Boolean
+  status       EvidenceStatus @default(NOT_REVIEWED)
+  reviewedById String?
+  reviewedAt   DateTime?
+  reviewNote   String?
+  createdAt    DateTime       @default(now())
+  review       Review         @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
+  @@index([status, createdAt])
+}
+
+/// PRD §12 BusinessResponse: one official reply per review (PRD §7.7).
+model BusinessResponse {
+  id         String             @id @default(uuid())
+  reviewId   String             @unique
+  businessId String
+  authorId   String
+  body       String
+  status     ResponseStatus     @default(PUBLISHED)
+  editCount  Int                @default(0)
+  editedAt   DateTime?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+  review     Review             @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  business   Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  author     User               @relation(fields: [authorId], references: [id])
+  revisions  ResponseRevision[]
+
+  @@index([businessId, createdAt])
+}
+
+model ResponseRevision {
+  id         String           @id @default(uuid())
+  responseId String
+  body       String
+  createdAt  DateTime         @default(now())
+  response   BusinessResponse @relation(fields: [responseId], references: [id], onDelete: Cascade)
+
+  @@index([responseId])
+}
+
+/// History of a review's resolution status (PRD §7.8: retain the history).
+model ResolutionEvent {
+  id        String           @id @default(uuid())
+  reviewId  String
+  status    ResolutionStatus
+  actorType ActorType
+  actorId   String?
+  note      String?
+  createdAt DateTime         @default(now())
+  review    Review           @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId, createdAt])
+}
+
+/// PRD §12 HelpfulVote: one active vote per user per review, changeable or removable (PRD §7.9).
+model HelpfulVote {
+  id        String    @id @default(uuid())
   reviewId  String
   userId    String
-  createdAt DateTime @default(now())
-  review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  value     VoteValue
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  review    Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([reviewId, userId])
 }
 
-model ReviewMedia {
-  id        String    @id @default(uuid())
-  reviewId  String
-  type      MediaType
-  url       String
-  createdAt DateTime  @default(now())
-  review    Review    @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+/// PRD §12 ReviewReport (PRD §8.3).
+model ReviewReport {
+  id             String       @id @default(uuid())
+  reviewId       String
+  reporterId     String
+  reporterType   ReporterType @default(CONSUMER)
+  businessId     String?
+  reason         ReportReason
+  details        String?
+  status         ReportStatus @default(OPEN)
+  resolvedById   String?
+  resolvedAt     DateTime?
+  resolutionNote String?
+  createdAt      DateTime     @default(now())
+  /// `${reviewId}:${reporterId}` while OPEN — one open report per person per review.
+  openKey        String?      @unique
+  review         Review       @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  reporter       User         @relation("ReportReporter", fields: [reporterId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([reviewId])
 }
 
+/// A business challenging a review (PRD §8.4). The review itself is never edited by this.
+model BusinessDispute {
+  id           String        @id @default(uuid())
+  reviewId     String
+  businessId   String
+  raisedById   String
+  reason       ReportReason
+  details      String
+  status       DisputeStatus @default(OPEN)
+  decisionNote String?
+  decidedById  String?
+  decidedAt    DateTime?
+  createdAt    DateTime      @default(now())
+  /// reviewId while OPEN — one open dispute per review.
+  openKey      String?       @unique
+  review       Review        @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  raisedBy     User          @relation("DisputeRaiser", fields: [raisedById], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([businessId])
+}
+
+/// Automatic signals that put a review in the moderation queue.
 model ReviewFlag {
   id        String   @id @default(uuid())
   reviewId  String
@@ -286,34 +793,29 @@ model ReviewFlag {
   metadata  Json?
   createdAt DateTime @default(now())
   review    Review   @relation(fields: [reviewId], references: [id], onDelete: Cascade)
+
+  @@index([reviewId])
 }
 
-model ReviewReport {
-  id         String       @id @default(uuid())
-  reviewId   String
-  reporterId String
-  reason     ReportReason
+/// PRD §12 ModerationAction: every moderation decision, with its policy ground.
+model ModerationAction {
+  id         String               @id @default(uuid())
+  targetType ModerationTarget
+  targetId   String
+  action     ModerationActionType
+  reason     PolicyReason?
   note       String?
-  status     ReportStatus @default(OPEN)
-  createdAt  DateTime     @default(now())
-  review     Review       @relation(fields: [reviewId], references: [id], onDelete: Cascade)
-  reporter   User         @relation(fields: [reporterId], references: [id], onDelete: Cascade)
+  actorId    String
+  reportId   String?
+  disputeId  String?
+  createdAt  DateTime             @default(now())
+  actor      User                 @relation(fields: [actorId], references: [id])
+
+  @@index([targetType, targetId])
+  @@index([createdAt])
 }
 
-model BrandSuggestion {
-  id        String           @id @default(uuid())
-  userId    String
-  name      String
-  category  BrandCategory
-  subType   String?
-  city      City
-  area      String
-  website   String?
-  status    SuggestionStatus @default(PENDING)
-  adminNote String?
-  createdAt DateTime         @default(now())
-  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
+// ────────────────────────────────────────────────────────── pre-launch marketing
 
 model SurveyResponse {
   id        String   @id @default(uuid())
@@ -324,15 +826,15 @@ model SurveyResponse {
 }
 
 model WaitlistEntry {
-  id           String     @id @default(uuid())
+  id           String    @id @default(uuid())
   fullName     String
-  email        String     @unique
+  email        String    @unique
   phone        String?
-  city         City
-  primaryUse   PrimaryUse
+  city         String
+  primaryUse   String
   attribution  String?
-  consentGiven Boolean    @default(true)
+  consentGiven Boolean   @default(true)
   invitedAt    DateTime?
   registeredAt DateTime?
-  createdAt    DateTime   @default(now())
+  createdAt    DateTime  @default(now())
 }

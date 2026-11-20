@@ -1,5 +1,8 @@
 # TalkGround — Database Schema Reference
 
+> **Outdated (v1).** API v2.0 replaced this document's endpoints and data model. Use
+> [FRONTEND-INTEGRATION.md](./FRONTEND-INTEGRATION.md) and [API-CHANGELOG-v2.md](./API-CHANGELOG-v2.md).
+
 **ORM:** Prisma 5  
 **Database:** PostgreSQL 16  
 **Schema file:** `apps/api/prisma/schema.prisma`

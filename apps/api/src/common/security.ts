@@ -41,6 +41,3 @@ export function durationToMs(value: string): number {
   ]!;
   return n * factor;
 }
-
-/** Ratings are only shown as reliable once a business has this many public reviews (PRD §7.12). */
-export const MIN_REVIEWS_FOR_RATING = 5;

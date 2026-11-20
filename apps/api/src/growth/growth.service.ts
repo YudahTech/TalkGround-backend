@@ -15,7 +15,9 @@ export class GrowthService {
         city: dto.city,
       },
     });
-    return { data: { id: response.id, message: 'Survey submitted. Thank you.' } };
+    return {
+      data: { id: response.id, message: 'Survey submitted. Thank you.' },
+    };
   }
 
   async joinWaitlist(dto: WaitlistDto) {
@@ -31,7 +33,7 @@ export class GrowthService {
         fullName: dto.fullName,
         email: dto.email,
         phone: dto.phone,
-        city: dto.city,
+        city: dto.city.trim().toLowerCase(),
         primaryUse: dto.primaryUse,
         attribution: dto.attribution,
         consentGiven: dto.consentGiven,
@@ -42,14 +44,18 @@ export class GrowthService {
   }
 
   async waitlistStats() {
-    const [total, lagos, abuja] = await Promise.all([
+    const [total, byCity] = await Promise.all([
       this.prisma.waitlistEntry.count(),
-      this.prisma.waitlistEntry.count({ where: { city: 'LAGOS' } }),
-      this.prisma.waitlistEntry.count({ where: { city: 'ABUJA' } }),
+      this.prisma.waitlistEntry.groupBy({
+        by: ['city'],
+        _count: { _all: true },
+      }),
     ]);
-
     return {
-      data: { total, byCity: { lagos, abuja } },
+      data: {
+        total,
+        byCity: Object.fromEntries(byCity.map((c) => [c.city, c._count._all])),
+      },
     };
   }
 }

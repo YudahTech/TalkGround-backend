@@ -65,19 +65,29 @@ export class AuthService {
 
   // ---------------------------------------------------------------- helpers
 
-  sanitizeUser(user: User) {
+  /** The account as the owner sees it (login/register/refresh/me). Never includes secrets. */
+  async sanitizeUser(user: User) {
+    const role = user.adminRoleId
+      ? await this.prisma.adminRole.findUnique({
+          where: { id: user.adminRoleId },
+          select: { key: true, name: true, permissions: true },
+        })
+      : null;
     return {
       id: user.id,
       email: user.email,
       username: user.username,
       displayName: user.displayName,
-      role: user.role,
       emailVerified: user.emailVerified,
       phoneVerified: user.phoneVerified,
       phone: user.phone,
       avatarUrl: user.avatarUrl ?? null,
       bio: user.bio ?? null,
-      city: user.city ? user.city.toLowerCase() : null,
+      location: user.location ?? null,
+      isStaff: !!role,
+      staffRole: role ? { key: role.key, name: role.name } : null,
+      permissions: role?.permissions ?? [],
+      createdAt: user.createdAt,
     };
   }
 
@@ -175,7 +185,7 @@ export class AuthService {
     const session = await this.issueSession(user);
     return {
       ...session,
-      user: this.sanitizeUser(user),
+      user: await this.sanitizeUser(user),
       message:
         'Account created. Check your email for a 6-digit verification code.',
       ...(emailCode?.devCode ? { devEmailCode: emailCode.devCode } : {}),
@@ -225,7 +235,7 @@ export class AuthService {
       data: { failedLoginCount: 0, lockedUntil: null },
     });
     const session = await this.issueSession(fresh);
-    return { ...session, user: this.sanitizeUser(fresh) };
+    return { ...session, user: await this.sanitizeUser(fresh) };
   }
 
   // -------------------------------------------------------- refresh / logout
@@ -264,7 +274,7 @@ export class AuthService {
     }
 
     const session = await this.issueSession(stored.user);
-    return { ...session, user: this.sanitizeUser(stored.user) };
+    return { ...session, user: await this.sanitizeUser(stored.user) };
   }
 
   async logout(
@@ -422,7 +432,7 @@ export class AuthService {
       where: { id: userId },
       data: { phoneVerified: true },
     });
-    return { user: this.sanitizeUser(updated) };
+    return { user: await this.sanitizeUser(updated) };
   }
 
   // ---------------------------------------------------------- email verification
@@ -460,7 +470,7 @@ export class AuthService {
       where: { id: userId },
       data: { emailVerified: true },
     });
-    return { user: this.sanitizeUser(updated) };
+    return { user: await this.sanitizeUser(updated) };
   }
 
   // ------------------------------------------------------------------ passwords
@@ -572,7 +582,7 @@ export class AuthService {
     const session = await this.issueSession(fresh);
     return {
       ...session,
-      user: this.sanitizeUser(fresh),
+      user: await this.sanitizeUser(fresh),
       message: 'Password changed',
     };
   }

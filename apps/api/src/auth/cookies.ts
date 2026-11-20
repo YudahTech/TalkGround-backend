@@ -55,7 +55,7 @@ export function readCookie(req: Request, name: string): string | undefined {
 }
 
 /**
- * Tokens never leave the server in a response body — they live only in HttpOnly cookies.
+ * Tokens never leave the server in a response body ï¿½ they live only in HttpOnly cookies.
  * Strips them from a session object before it is returned as JSON.
  */
 export function withoutTokens<T extends Session>(
